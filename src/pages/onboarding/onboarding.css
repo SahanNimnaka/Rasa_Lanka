@@ -1,0 +1,68 @@
+.onboarding-screen {
+  padding-top: max(3.75rem, calc(env(safe-area-inset-top) + 1.25rem));
+}
+
+.onboarding-header {
+  height: 2rem;
+}
+
+.onboarding-content {
+  margin-top: 3rem;
+}
+
+.onboarding-artwork {
+  aspect-ratio: 4 / 3;
+}
+
+.onboarding-copy {
+  margin-top: 3rem;
+}
+
+.onboarding-title-slot {
+  min-height: 4.5rem;
+}
+
+.onboarding-description {
+  margin-top: 1rem;
+}
+
+.onboarding-footer {
+  bottom: max(4.75rem, calc(env(safe-area-inset-bottom) + 2.5rem));
+  gap: 2.25rem;
+}
+
+@media (max-height: 700px) {
+  .onboarding-screen {
+    padding-top: max(2rem, calc(env(safe-area-inset-top) + 0.5rem));
+  }
+
+  .onboarding-content {
+    margin-top: 0.75rem;
+  }
+
+  .onboarding-artwork {
+    max-height: 12.75rem;
+  }
+
+  .onboarding-copy {
+    margin-top: 1rem;
+  }
+
+  .onboarding-title-slot {
+    min-height: 4rem;
+  }
+
+  .onboarding-step-title {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+
+  .onboarding-description {
+    margin-top: 0;
+  }
+
+  .onboarding-footer {
+    bottom: max(2rem, calc(env(safe-area-inset-bottom) + 0.75rem));
+    gap: 1.5rem;
+  }
+}

@@ -1,9 +1,24 @@
+import { useEffect } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { BrandLogo } from '../components/BrandLogo'
 import { LoadingIndicator } from '../components/ui/LoadingIndicator'
 
-export function SplashScreen() {
+export interface SplashScreenProps {
+  onComplete?: () => void
+}
+
+export function SplashScreen({ onComplete }: SplashScreenProps) {
   const prefersReducedMotion = useReducedMotion() ?? false
+
+  useEffect(() => {
+    if (!onComplete) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(onComplete, 1200)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [onComplete])
 
   return (
     <main

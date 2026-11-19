@@ -7,6 +7,7 @@ const variantClasses = {
     'border border-forest-green/20 bg-white text-forest-green hover:bg-warm-cream',
   ghost: 'bg-transparent text-forest-green hover:bg-forest-green/5',
   danger: 'bg-chilli-red text-white hover:bg-chilli-red/90',
+  ink: 'bg-ink text-white hover:bg-forest-green',
 } as const
 
 const sizeClasses = {
