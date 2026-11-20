@@ -6,12 +6,17 @@ import { ScreenHeader } from '../../components/layout/ScreenHeader'
 import { RecipeCard } from '../../components/recipes/RecipeCard'
 import { RecipeFilters } from '../../components/recipes/RecipeFilters'
 import { Button } from '../../components/ui/Button'
+import { LoadingIndicator } from '../../components/ui/LoadingIndicator'
 import { useCookingFlow } from '../../context/cookingFlowStore'
 import { useNavigateBack } from '../../hooks/useNavigateBack'
 import {
-  getMockRecipes,
-  MOCK_RECOMMENDATION_NOTICE,
-} from '../../services/mockRecipeService'
+  useRecipeDetails,
+  useRecipes,
+} from '../../hooks/queries'
+import {
+  createApiRecommendationCandidates,
+  type ApiRecommendationCandidate,
+} from '../../services/apiRecommendationAdapter'
 import {
   DEFAULT_RECIPE_FILTERS,
   DEFAULT_SORT_OPTION,
@@ -19,6 +24,10 @@ import {
   type RecipeFilterOptions,
 } from '../../services/recommendationService'
 import type { RecipeSortOption } from '../../types/recipe'
+import {
+  recipeDurationLabel,
+  recipeMetaLabel,
+} from '../../utils/recipePresentation'
 
 interface RecommendationsRouteState {
   servings?: number
@@ -33,6 +42,15 @@ const SORT_OPTIONS: Array<{
   { value: 'prep-time', label: 'Prep time' },
   { value: 'name', label: 'Name (A–Z)' },
 ]
+
+function candidateMeta(candidate: ApiRecommendationCandidate): string | null {
+  const parts = [recipeMetaLabel(candidate.summary)]
+  if (candidate.matchedIngredientNames.length > 0) {
+    const count = candidate.matchedIngredientNames.length
+    parts.push(`${count} matching ingredient${count === 1 ? '' : 's'}`)
+  }
+  return parts.filter(Boolean).join(' · ') || null
+}
 
 export function RecipeRecommendationsScreen() {
   const navigate = useNavigate()
@@ -52,14 +70,36 @@ export function RecipeRecommendationsScreen() {
   )
   const [showFilters, setShowFilters] = useState(false)
 
+  const selectedIngredientNames = useMemo(
+    () => flow.ingredients.map((ingredient) => ingredient.name),
+    [flow.ingredients],
+  )
+
+  const recipesQuery = useRecipes({ page: 1, per_page: 50, sort: 'name' })
+  const summaries = useMemo(
+    () => recipesQuery.data?.data ?? [],
+    [recipesQuery.data],
+  )
+  const detailsQuery = useRecipeDetails(summaries.map((recipe) => recipe.id))
+
+  const candidates = useMemo(
+    () =>
+      createApiRecommendationCandidates(
+        summaries,
+        detailsQuery.data,
+        selectedIngredientNames,
+      ),
+    [detailsQuery.data, selectedIngredientNames, summaries],
+  )
+
   const recipes = useMemo(
     () =>
-      getRecommendedRecipes(getMockRecipes(), {
+      getRecommendedRecipes(candidates, {
         servings,
         sort,
         filters,
       }),
-    [filters, servings, sort],
+    [candidates, filters, servings, sort],
   )
 
   function handleSelectRecipe(recipeId: string) {
@@ -75,89 +115,130 @@ export function RecipeRecommendationsScreen() {
       <ScreenHeader onBack={goBack} />
 
       <section className="mt-3">
-        <h1 className="text-[1.75rem] font-bold" id="recommendations-title">
+        <p className="eyebrow-label">Picked for your ingredients</p>
+        <h1
+          className="mt-1 text-[1.8rem] font-extrabold"
+          id="recommendations-title"
+        >
           Recommended Recipes
         </h1>
         <p className="mt-2 text-sm text-muted">
           Recipes for {servings} {servings === 1 ? 'person' : 'people'}
         </p>
-        <p className="mt-2 rounded-lg bg-warm-cream/70 px-3 py-2 text-xs leading-5 text-muted">
-          {MOCK_RECOMMENDATION_NOTICE}
+        <p className="glass-panel mt-3 rounded-xl px-3 py-2 text-xs leading-5 text-muted">
+          Ingredient overlap is calculated locally from Laravel recipe data.
+          Ratings and images are not provided. These are not AI-generated
+          recommendations.
+          {detailsQuery.isError
+            ? ' Ingredient overlap could not be loaded for some recipes.'
+            : ''}
         </p>
 
-        <div className="mt-5 flex items-center gap-3">
-          <Button
-            aria-controls="recipe-filter-panel"
-            aria-expanded={showFilters}
-            onClick={() => setShowFilters((current) => !current)}
-            size="sm"
-            variant="secondary"
-          >
-            <SlidersHorizontal aria-hidden="true" size={16} />
-            Filters
-          </Button>
-          <label className="ml-auto flex items-center gap-1 text-xs text-muted">
-            <span>Sort:</span>
-            <select
-              aria-label="Sort recipes"
-              className="rounded-control border border-forest-green/20 bg-white px-2 py-2 text-xs font-semibold text-forest-green focus:border-fresh-green focus:outline-none focus:ring-2 focus:ring-fresh-green/25"
-              onChange={(event) =>
-                setSort(event.target.value as RecipeSortOption)
-              }
-              value={sort}
-            >
-              {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {showFilters && (
-          <div id="recipe-filter-panel">
-            <RecipeFilters
-              filters={filters}
-              onChange={setFilters}
-              onClear={() => setFilters(DEFAULT_RECIPE_FILTERS)}
-            />
-          </div>
-        )}
-
-        {recipes.length === 0 ? (
-          <div className="mt-8 rounded-card border border-dashed border-forest-green/20 p-6 text-center">
-            <h2 className="text-base font-bold">No matching recipes</h2>
-            <p className="mt-2 text-sm text-muted">
-              Try clearing a filter to see more recipes.
-            </p>
+        <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
+          <aside>
             <Button
-              className="mt-4"
-              onClick={() => setFilters(DEFAULT_RECIPE_FILTERS)}
+              aria-controls="recipe-filter-panel"
+              aria-expanded={showFilters}
+              className="lg:hidden"
+              onClick={() => setShowFilters((current) => !current)}
               size="sm"
+              variant="secondary"
             >
-              Clear filters
+              <SlidersHorizontal aria-hidden="true" size={16} />
+              Filters
             </Button>
-          </div>
-        ) : (
-          <div className="mt-5 grid gap-5">
-            {recipes.map((recipe) => (
-              <RecipeCard
-                duration={`${recipe.durationMinutes} min`}
-                image={recipe.image}
-                isFavorite={flow.favoriteRecipeIds.includes(recipe.id)}
-                key={recipe.id}
-                matchPercent={recipe.matchPercent}
-                name={recipe.name}
-                onSelect={() => handleSelectRecipe(recipe.id)}
-                onToggleFavorite={() => flow.toggleFavorite(recipe.id)}
-                rating={recipe.rating}
+            <div
+              className={showFilters ? 'block' : 'hidden lg:block'}
+              id="recipe-filter-panel"
+            >
+              <RecipeFilters
+                filters={filters}
+                onChange={setFilters}
+                onClear={() => setFilters(DEFAULT_RECIPE_FILTERS)}
               />
-            ))}
-          </div>
-        )}
+            </div>
+          </aside>
 
-        <p className="mt-6 text-center text-xs text-muted">Scroll to recipes</p>
+          <div className="min-w-0">
+            <div className="flex items-center justify-end gap-3">
+              {detailsQuery.isFetching && (
+                <span className="text-[11px] text-muted">
+                  Checking ingredient overlap...
+                </span>
+              )}
+              <label className="flex items-center gap-2 text-xs text-muted">
+                <span>Sort:</span>
+                <select
+                  aria-label="Sort recipes"
+                  className="rounded-xl border border-forest-green/15 bg-white/90 px-2 py-2 text-xs font-bold text-ink shadow-sm focus:border-spice-orange focus:outline-none focus:ring-4 focus:ring-spice-orange/15"
+                  onChange={(event) =>
+                    setSort(event.target.value as RecipeSortOption)
+                  }
+                  value={sort}
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {recipesQuery.isPending ? (
+              <div className="mt-8">
+                <LoadingIndicator label="Loading recipe catalogue..." />
+              </div>
+            ) : recipesQuery.isError ? (
+              <div className="mt-8 rounded-card border border-chilli-red/20 bg-white/70 p-6 text-center">
+                <h2 className="text-base font-bold">
+                  Recipe catalogue unavailable.
+                </h2>
+                <p className="mt-2 text-sm text-muted">
+                  {recipesQuery.error?.message ??
+                    'The recipe service is temporarily unavailable.'}
+                </p>
+                <Button
+                  className="mt-4"
+                  onClick={() => void recipesQuery.refetch()}
+                  size="sm"
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : recipes.length === 0 ? (
+              <div className="mt-8 rounded-card border border-dashed border-forest-green/20 p-6 text-center">
+                <h2 className="text-base font-bold">No matching recipes</h2>
+                <p className="mt-2 text-sm text-muted">
+                  Try clearing a filter to see more recipes.
+                </p>
+                <Button
+                  className="mt-4"
+                  onClick={() => setFilters(DEFAULT_RECIPE_FILTERS)}
+                  size="sm"
+                >
+                  Clear filters
+                </Button>
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                {recipes.map((recipe) => (
+                  <RecipeCard
+                    duration={recipeDurationLabel(
+                      recipe.summary.durationMinutes,
+                    )}
+                    isFavorite={flow.favoriteRecipeIds.includes(recipe.id)}
+                    key={recipe.id}
+                    meta={candidateMeta(recipe)}
+                    name={recipe.summary.name}
+                    onSelect={() => handleSelectRecipe(recipe.id)}
+                    onToggleFavorite={() => flow.toggleFavorite(recipe.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </section>
     </MobileScreen>
   )

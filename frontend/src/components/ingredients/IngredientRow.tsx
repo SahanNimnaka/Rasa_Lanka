@@ -20,13 +20,13 @@ export function IngredientRow({
   const isManual = ingredient.source === 'manual'
 
   return (
-    <div className="flex items-center gap-2 rounded-card border border-forest-green/15 bg-white p-2">
+    <div className="glass-panel flex items-center gap-2 rounded-2xl p-2">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <span className="flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-lg bg-warm-cream text-forest-green/60">
+        <span className="flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-warm-cream to-warm-cream/40 text-fresh-green">
           <ImageIcon aria-hidden="true" size={22} />
         </span>
         <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold text-forest-green">
+          <span className="block truncate text-sm font-semibold text-ink">
             {ingredient.name}
           </span>
           <span className="block text-xs text-muted">

@@ -98,15 +98,19 @@ export function IngredientRecognitionScreen() {
       <ScreenHeader onBack={goBack} />
 
       <section className="mt-3">
-        <h1 className="text-[1.75rem] font-bold" id="recognition-title">
+        <p className="eyebrow-label">Review your ingredients</p>
+        <h1
+          className="mt-1 text-[1.7rem] font-extrabold"
+          id="recognition-title"
+        >
           Detected Ingredients
         </h1>
 
         <div
           aria-label="Demonstration recognition data"
-          className="mt-4 rounded-lg border border-spice-orange/50 bg-warm-cream/70 px-3 py-2"
+          className="glass-panel mt-4 rounded-xl border border-spice-orange/40 px-3 py-2"
         >
-          <p className="text-xs font-bold text-forest-green">
+          <p className="text-xs font-bold text-ink">
             Demo data — not a model result
           </p>
           <p className="mt-1 text-xs leading-5 text-muted">
@@ -138,7 +142,7 @@ export function IngredientRecognitionScreen() {
             Select ingredients to use in your recipes.
           </p>
 
-          <div className="mt-4 grid gap-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 md:gap-5">
             {recognized.map((ingredient) => (
               <IngredientRow
                 confidenceLabel="Demo confidence"
@@ -219,7 +223,7 @@ export function IngredientRecognitionScreen() {
             <ul className="mt-3 flex flex-wrap gap-2">
               {finalSelection.map((ingredient) => (
                 <li
-                  className="rounded-full bg-fresh-green/10 px-3 py-1 text-xs font-semibold text-forest-green"
+                  className="rounded-full bg-fresh-green/10 px-3 py-1 text-xs font-semibold text-ink"
                   key={ingredient.id}
                 >
                   {ingredient.name}

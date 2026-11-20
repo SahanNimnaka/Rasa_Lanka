@@ -1,4 +1,4 @@
-import type { Recipe, RecipeSortOption } from '../types/recipe'
+import type { RecipeSortOption } from '../types/recipe'
 
 export interface RecipeFilterOptions {
   highMatchOnly: boolean
@@ -9,6 +9,18 @@ export interface RecommendationOptions {
   servings: number
   sort: RecipeSortOption
   filters: RecipeFilterOptions
+}
+
+/**
+ * The local ranking only needs these fields. API-backed candidates can supply
+ * them without fabricating the rest of the legacy mock `Recipe` shape.
+ */
+export interface RecommendationCandidate {
+  id: string
+  name: string
+  durationMinutes: number | null
+  rating?: number | null
+  matchPercent?: number | null
 }
 
 export const DEFAULT_SORT_OPTION: RecipeSortOption = 'best-match'
@@ -25,40 +37,53 @@ function clampServings(servings: number): number {
   return Math.max(1, Math.min(20, Math.floor(servings)))
 }
 
-function compareRecipes(
+function ratingOf(recipe: RecommendationCandidate): number {
+  return recipe.rating ?? 0
+}
+
+function scoreOf(recipe: RecommendationCandidate): number {
+  return recipe.matchPercent ?? 0
+}
+
+function durationOf(recipe: RecommendationCandidate): number {
+  return recipe.durationMinutes ?? Number.MAX_SAFE_INTEGER
+}
+
+function compareRecipes<T extends RecommendationCandidate>(
   sort: RecipeSortOption,
-): (a: Recipe, b: Recipe) => number {
+): (a: T, b: T) => number {
   switch (sort) {
     case 'rating':
-      return (a, b) => b.rating - a.rating
+      return (a, b) => ratingOf(b) - ratingOf(a)
     case 'prep-time':
-      return (a, b) => a.durationMinutes - b.durationMinutes
+      return (a, b) => durationOf(a) - durationOf(b)
     case 'name':
       return (a, b) => a.name.localeCompare(b.name)
     case 'best-match':
     default:
-      return (a, b) => b.matchPercent - a.matchPercent
+      return (a, b) => scoreOf(b) - scoreOf(a)
   }
 }
 
 /**
- * Recommendation ranking is intentionally local and deterministic. It only
- * sorts and filters mock data until a real recommendation API is connected.
+ * Recommendation ranking remains local and deterministic. It sorts and filters
+ * the supplied candidate catalogue; no backend recommendation endpoint is used.
  */
-export function getRecommendedRecipes(
-  recipes: Recipe[],
+export function getRecommendedRecipes<T extends RecommendationCandidate>(
+  recipes: T[],
   options: RecommendationOptions,
-): Recipe[] {
+): Array<T & { servings: number }> {
   const servings = clampServings(options.servings)
 
   return recipes
     .filter((recipe) => {
-      if (options.filters.highMatchOnly && recipe.matchPercent < 80) {
+      if (options.filters.highMatchOnly && scoreOf(recipe) < 80) {
         return false
       }
       if (
         options.filters.underThirtyMinutesOnly &&
-        recipe.durationMinutes >= 30
+        (recipe.durationMinutes === null ||
+          recipe.durationMinutes >= 30)
       ) {
         return false
       }

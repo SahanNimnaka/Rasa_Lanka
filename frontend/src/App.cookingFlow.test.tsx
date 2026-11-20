@@ -3,6 +3,14 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { AppRoutes } from './App'
+import { mockApiAdapter } from './test/apiMock'
+import {
+  itemEnvelope,
+  paginatedEnvelope,
+  recipeDetailDto,
+  recipeSummaryDto,
+} from './test/queryFixtures'
+import { makeAxiosResponse, setApiAdapter } from './test/queryTestUtils'
 
 function HistoryControls() {
   const navigate = useNavigate()
@@ -47,6 +55,35 @@ describe('Screens 11–15 cooking flow', () => {
   })
 
   it('preserves quantities and servings across the flow and browser history', async () => {
+    setApiAdapter(async (config) => {
+      const url = config.url ?? ''
+      if (url === '/recipes') {
+        return makeAxiosResponse(
+          config,
+          paginatedEnvelope([
+            {
+              ...recipeSummaryDto,
+              id: 11,
+              name: 'Dhal Curry',
+              total_time_minutes: 25,
+            },
+          ]),
+        )
+      }
+      if (url === '/recipes/11') {
+        return makeAxiosResponse(
+          config,
+          itemEnvelope({
+            ...recipeDetailDto,
+            id: 11,
+            name: 'Dhal Curry',
+            total_time_minutes: 25,
+          }),
+        )
+      }
+      return mockApiAdapter(config)
+    })
+
     const user = userEvent.setup()
     renderFlow()
 

@@ -17,7 +17,7 @@ export function ScreenHeader({ action, className, onBack }: ScreenHeaderProps) {
       {onBack ? (
         <Button
           aria-label="Go back"
-          className="-ml-2 h-10 w-10 rounded-full p-0"
+          className="-ml-2 h-10 w-10 rounded-full border border-forest-green/10 bg-white/90 p-0 shadow-sm backdrop-blur-sm"
           onClick={onBack}
           size="sm"
           variant="ghost"

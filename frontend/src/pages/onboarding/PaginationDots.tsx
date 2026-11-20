@@ -20,8 +20,10 @@ export function PaginationDots({
               aria-current={isCurrentStep ? 'step' : undefined}
               aria-label={`Step ${index + 1} of ${totalSteps}${isCurrentStep ? ', current step' : ''}`}
               className={cn(
-                'h-2 w-2 rounded-full',
-                isCurrentStep ? 'bg-ink' : 'bg-progress-track',
+                'h-2 rounded-full transition-all duration-300',
+                isCurrentStep
+                  ? 'w-7 bg-gradient-to-r from-[#FF8A00] to-[#F6B73C] shadow-[0_0_10px_rgba(255,138,0,0.5)]'
+                  : 'w-2 bg-progress-track',
               )}
               key={index}
             />

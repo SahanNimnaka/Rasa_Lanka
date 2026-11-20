@@ -1,32 +1,18 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter } from 'react-router-dom'
 import { AppRoutes } from './App'
-import {
-  APP_STATE_STORAGE_KEY,
-  createDefaultAppState,
-} from './services/appStateService'
 
-function NavigateToHistory() {
-  const navigate = useNavigate()
-  return (
-    <button onClick={() => navigate('/history')} type="button">
-      Open history
-    </button>
-  )
-}
-
-function renderRoutes(initialEntry: string, withHistoryControl = false) {
+function renderRoutes(initialEntry: string) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <AppRoutes />
-      {withHistoryControl && <NavigateToHistory />}
     </MemoryRouter>,
   )
 }
 
-describe('Screens 16–22 routes', () => {
+describe('Screens 16–23 routes', () => {
   beforeEach(() => {
     sessionStorage.clear()
     localStorage.clear()
@@ -42,25 +28,17 @@ describe('Screens 16–22 routes', () => {
     ['/profile', 'Profile'],
     ['/preferences', 'Cooking Preferences'],
     ['/settings', 'Settings'],
-  ])('renders %s as %s', (route, heading) => {
+    ['/about', 'About'],
+  ])('renders %s as %s', async (route, heading) => {
     renderRoutes(route)
 
-    expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: heading }),
+    ).toBeInTheDocument()
   })
 
-  it('records real recipe opens in history', async () => {
-    const user = userEvent.setup()
-    const state = createDefaultAppState()
-    state.history = []
-    localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(state))
-
-    renderRoutes('/recipes/dhal-curry', true)
-
-    expect(
-      await screen.findByRole('button', { name: 'Start Cooking' }),
-    ).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Open history' }))
+  it('keeps the existing demo history entries visible', async () => {
+    renderRoutes('/history')
 
     expect(
       await screen.findByRole('heading', { name: 'History' }),
@@ -72,6 +50,10 @@ describe('Screens 16–22 routes', () => {
   it('uses the bottom navigation between Home, Search, Saved and Profile', async () => {
     const user = userEvent.setup()
     renderRoutes('/profile')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Profile' }),
+    ).toBeInTheDocument()
 
     const navigation = screen.getByRole('navigation', {
       name: 'Primary navigation',

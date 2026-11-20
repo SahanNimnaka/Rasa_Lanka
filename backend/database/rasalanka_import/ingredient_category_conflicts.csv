@@ -1,0 +1,8 @@
+ingredient_name,category_labels,category_count,review_required,note
+Black peppercorns,Spice | Spice blend,2,True,The same ingredient name has multiple category labels in source workbooks; preserve until taxonomy decision.
+Ceylon cinnamon,Spice | Spice blend,2,True,The same ingredient name has multiple category labels in source workbooks; preserve until taxonomy decision.
+Cloves,Spice | Spice blend,2,True,The same ingredient name has multiple category labels in source workbooks; preserve until taxonomy decision.
+Cumin seeds,Paste spice | Spice | Spice blend,3,True,The same ingredient name has multiple category labels in source workbooks; preserve until taxonomy decision.
+Fennel seeds,Spice | Spice blend,2,True,The same ingredient name has multiple category labels in source workbooks; preserve until taxonomy decision.
+Mustard seeds,Paste spice | Spice,2,True,The same ingredient name has multiple category labels in source workbooks; preserve until taxonomy decision.
+Raw rice,Paste ingredient | Spice blend,2,True,The same ingredient name has multiple category labels in source workbooks; preserve until taxonomy decision.

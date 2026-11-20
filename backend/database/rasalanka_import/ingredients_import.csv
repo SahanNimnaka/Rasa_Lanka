@@ -1,0 +1,117 @@
+ingredient_key,ingredient_name,category_labels,category_conflict_flag
+black_mustard_seeds,Black mustard seeds,Spice,False
+black_pepper,Black pepper,Spice,False
+black_pepper_powder,Black pepper powder,Spice,False
+black_peppercorns,Black peppercorns,Spice | Spice blend,True
+brinjal,Brinjal,Main ingredient,False
+cardamom,Cardamom,Spice,False
+ceylon_cinnamon,Ceylon cinnamon,Spice | Spice blend,True
+chicken,Chicken,Main ingredient,False
+chicken_pieces_on_the_bone,Chicken pieces on the bone,Main ingredient,False
+chilli_flakes,Chilli flakes,Spice,False
+chilli_powder,Chilli powder,Spice,False
+cinnamon,Cinnamon,Spice,False
+cloves,Cloves,Spice | Spice blend,True
+coconut_milk,Coconut milk,Liquid,False
+coconut_oil,Coconut oil,Fat,False
+coconut_oil_neutral_oil,Coconut oil / neutral oil,Fat,False
+coconut_oil_or_neutral_oil,Coconut oil or neutral oil,Fat,False
+coconut_vinegar,Coconut vinegar,Acid,False
+cooking_oil,Cooking oil,Fat,False
+coriander_seeds,Coriander seeds,Spice blend,False
+cumin_seeds,Cumin seeds,Paste spice | Spice | Spice blend,True
+curry_leaves,Curry leaves,Herb,False
+curry_leaves_for_curry,Curry leaves for curry,Herb,False
+curry_leaves_for_dhal,Curry leaves for dhal,Herb,False
+curry_leaves_for_spice_blend,Curry leaves for spice blend,Herb,False
+curry_leaves_for_temper,Curry leaves for temper,Herb,False
+curry_liquids_and_remaining_aromatics,Curry liquids and remaining aromatics,Other,False
+curry_powder,Curry powder,Spice,False
+dried_chilli_flakes,Dried chilli flakes,Spice,False
+dried_red_chilli,Dried red chilli,Paste spice,False
+dried_red_chillies,Dried red chillies,Spice,False
+dried_whole_chillies,Dried whole chillies,Spice,False
+eggplant_brinjal,Eggplant / brinjal,Main ingredient,False
+fennel_seeds,Fennel seeds,Spice | Spice blend,True
+fenugreek,Fenugreek,Spice,False
+fenugreek_seeds,Fenugreek seeds,Spice,False
+fish,Fish,Main ingredient,False
+fresh_ginger,Fresh ginger,Aromatic,False
+garcinia_goraka_paste,Garcinia / goraka paste,Souring agent,False
+garlic,Garlic,Aromatic,False
+garlic_for_paste,Garlic for paste,Aromatic,False
+garlic_for_tempering,Garlic for tempering,Aromatic,False
+ginger,Ginger,Aromatic,False
+ginger_garlic_paste,Ginger-garlic paste,Aromatic,False
+goraka,Goraka,Souring agent,False
+grated_coconut,Grated coconut,Paste ingredient,False
+grated_fresh_coconut,Grated fresh coconut,Paste ingredient,False
+green_cardamom,Green cardamom,Spice blend,False
+green_chilli,Green chilli,Aromatic,False
+green_chillies,Green chillies,Aromatic,False
+ground_turmeric,Ground turmeric,Spice,False
+hot_chilli_powder,Hot chilli powder,Spice,False
+jackfruit_seeds,Jackfruit seeds,Main ingredient,False
+large_onion,Large onion,Aromatic,False
+large_potatoes,Large potatoes,Main ingredient,False
+lime,Lime,Acid,False
+lime_juice,Lime juice,Acid,False
+long_green_chilli,Long green chilli,Aromatic,False
+maldive_fish,Maldive fish,Animal-derived ingredient,False
+maldive_fish_flakes,Maldive fish flakes,Animal-derived ingredient,False
+mature_jackfruit_kos_madulu,Mature jackfruit (kos madulu),Main ingredient,False
+mustard,Mustard,Spice,False
+mustard_seed,Mustard seed,Spice,False
+mustard_seeds,Mustard seeds,Paste spice | Spice,True
+oil,Oil,Fat,False
+oil_for_deep_frying,Oil for deep frying,Fat,False
+oil_for_frying,Oil for frying,Fat,False
+oil_for_tempering,Oil for tempering,Fat,False
+oil_or_coconut_oil,Oil or coconut oil,Fat,False
+onion,Onion,Aromatic,False
+pandan,Pandan,Herb,False
+pandan_rampe,Pandan (rampe),Herb,False
+pandan_and_curry_leaves_for_paste,Pandan and curry leaves for paste,Herb,False
+pandan_and_curry_leaves_for_tempering,Pandan and curry leaves for tempering,Herb,False
+pandan_leaf,Pandan leaf,Herb,False
+pandan_leaves,Pandan leaves,Herb,False
+pepper,Pepper,Spice,False
+potatoes,Potatoes,Main ingredient,False
+pumpkin,Pumpkin,Main ingredient,False
+raw_rice,Raw rice,Paste ingredient | Spice blend,True
+red_lentils_masoor_dhal,Red lentils (masoor dhal),Main ingredient,False
+red_lentils_parippu,Red lentils (parippu),Main ingredient,False
+red_onion,Red onion,Aromatic,False
+red_onions,Red onions,Aromatic,False
+roasted_chilli_powder,Roasted chilli powder,Spice,False
+roasted_curry_powder,Roasted curry powder,Spice,False
+roasted_sri_lankan_curry_powder,Roasted Sri Lankan curry powder,Spice,False
+sailfish,Sailfish,Main ingredient,False
+salt,Salt,Seasoning,False
+salt_for_parboiling,Salt for parboiling,Seasoning,False
+small_onion,Small onion,Aromatic,False
+small_onion_for_dhal,Small onion for dhal,Aromatic,False
+small_onion_for_temper,Small onion for temper,Aromatic,False
+small_potatoes,Small potatoes,Main ingredient,False
+sri_lankan_curry_powder,Sri Lankan curry powder,Spice,False
+sri_lankan_raw_curry_powder,Sri Lankan raw curry powder,Spice,False
+sugar,Sugar,Sweetener,False
+tamarind,Tamarind,Acid,False
+tamarind_paste,Tamarind paste,Acid,False
+thick_coconut_milk,Thick coconut milk,Liquid,False
+thin_and_thick_coconut_milk_mixture,Thin and thick coconut milk mixture,Liquid,False
+thin_coconut_milk,Thin coconut milk,Liquid,False
+thin_coconut_milk_or_water,Thin coconut milk or water,Liquid,False
+tomato,Tomato,Vegetable,False
+tuna,Tuna,Main ingredient,False
+turmeric,Turmeric,Spice,False
+turmeric_for_parboiling,Turmeric for parboiling,Spice,False
+turmeric_powder,Turmeric powder,Spice,False
+vegetable_oil,Vegetable oil,Fat,False
+vinegar,Vinegar,Acid,False
+vinegar_or_lime_juice,Vinegar or lime juice,Acid,False
+water,Water,Liquid,False
+water_for_parboiling,Water for parboiling,Liquid,False
+white_pepper,White pepper,Spice,False
+white_raw_rice,White raw rice,Paste ingredient,False
+young_green_jackfruit_polos,Young green jackfruit (polos),Main ingredient,False

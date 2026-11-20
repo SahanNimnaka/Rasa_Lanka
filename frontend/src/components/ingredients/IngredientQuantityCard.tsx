@@ -21,7 +21,7 @@ export function IngredientQuantityCard({
 }: IngredientQuantityCardProps) {
   return (
     <Card className="flex min-w-0 items-stretch gap-3 p-3">
-      <div className="flex h-[76px] w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-warm-cream">
+      <div className="flex h-[76px] w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-warm-cream to-warm-cream/40">
         {ingredient.image ? (
           <img
             alt={ingredient.name}
@@ -40,9 +40,7 @@ export function IngredientQuantityCard({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-bold text-forest-green">
-          {ingredient.name}
-        </h3>
+        <h3 className="text-sm font-bold text-ink">{ingredient.name}</h3>
         <div className="mt-2">
           <QuantityInput
             error={error}

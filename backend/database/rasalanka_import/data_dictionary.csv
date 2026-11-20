@@ -1,0 +1,38 @@
+Column,PostgreSQL_Staging_Type,Handling
+Category,TEXT,Added consolidation label; not in original workbook.
+Recipe_ID,TEXT,Recipe identifier; unique across 20 recipes.
+Recipe_Name,TEXT,Recipe title.
+Main_Ingredient,TEXT,Recipe-level main ingredient label.
+Recipe_Type,TEXT,Recipe classification.
+Cooking_Variation,TEXT,Recipe variation.
+Region,TEXT,Region label.
+Recipe_Description,TEXT,Description.
+Preparation_Time_Min,INTEGER,Numeric minutes; estimate flags kept separately.
+Cooking_Time_Min,INTEGER,Numeric minutes; estimate flags kept separately.
+Total_Time_Min,INTEGER,Numeric minutes; two recipe arithmetic mismatches require review.
+Source_Yield_People,NUMERIC,Serving yield; four recipes are estimated.
+Cooking_Method_Paragraph,TEXT,Long-form cooking method.
+Cooking_Steps_Ordered,TEXT,Ordered instructions.
+Ingredient_ID,TEXT,Unique source row identifier for a recipe-ingredient record.
+Ingredient_Name,TEXT,Ingredient name.
+Ingredient_Category,TEXT,Category label; seven names have category conflicts.
+Is_Main_Ingredient,BOOLEAN,Converted from Yes/No to TRUE/FALSE in PostgreSQL staging CSV.
+Original_Quantity,TEXT,"Kept as text to preserve fractions, ranges and qualitative source quantities."
+Original_Unit,TEXT,Source unit text.
+Quantity_Per_Person_Calculated,TEXT,"Source workbook field can contain numeric values, ranges, or qualitative descriptions."
+Per_Person_Unit,TEXT,Calculated quantity unit.
+Approved_Quantity_Per_Person,TEXT,Workbook retains 'Pending expert validation'; normalized relation file leaves numeric approved value NULL and sets approval_status.
+Approved_Unit,TEXT,Workbook uses N/A; normalized relation file leaves approved unit NULL until approval.
+Ingredient_Preparation,TEXT,Ingredient preparation details.
+Required_or_Optional,TEXT,Requirement label; values preserved exactly.
+Ingredient_Notes,TEXT,Notes.
+Source_ID,TEXT,Source identifier.
+Source_Title,TEXT,Source title.
+Source_URL,TEXT,Source URL.
+Data_Quality_Status,TEXT,Original provenance/quality text retained; explicit estimate flags are also added in normalized CSVs.
+Time_Estimated_Flag,BOOLEAN,TRUE where one or more recipe time fields were estimated.
+Yield_Estimated_Flag,BOOLEAN,"TRUE where serving yield was assumed; includes POT-005, FIS-003, JAC-002 and PAR-002."
+Quantity_Derived_Flag,BOOLEAN,TRUE where per-person quantity was calculated from original quantity and yield.
+Quantity_Description_Estimated_Flag,BOOLEAN,TRUE where a descriptive fallback such as To taste / As needed / Not quantified was inserted.
+Quantity_Depends_On_Estimated_Yield_Flag,BOOLEAN,TRUE where a numeric per-person value depends on an estimated serving yield.
+Any_Estimated_Flag,BOOLEAN,Combined flag for estimate-dependent values; inspect the individual flags for precise provenance.

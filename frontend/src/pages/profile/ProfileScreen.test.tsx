@@ -1,13 +1,14 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AppStateProvider } from '../../context/AppStateContext'
 import { APP_STATE_STORAGE_KEY } from '../../services/appStateService'
+import { renderWithAuth } from '../../test/authTestUtils'
 import { ProfileScreen } from './ProfileScreen'
 
-function renderScreen() {
-  render(
+function renderScreen(authOverrides = {}) {
+  return renderWithAuth(
     <MemoryRouter initialEntries={['/profile']}>
       <AppStateProvider>
         <Routes>
@@ -16,9 +17,12 @@ function renderScreen() {
           <Route element={<p>Saved destination</p>} path="/saved" />
           <Route element={<p>History destination</p>} path="/history" />
           <Route element={<p>Settings destination</p>} path="/settings" />
+          <Route element={<p>About destination</p>} path="/about" />
+          <Route element={<p>Login destination</p>} path="/login" />
         </Routes>
       </AppStateProvider>
     </MemoryRouter>,
+    authOverrides,
   )
 }
 
@@ -27,7 +31,7 @@ describe('ProfileScreen', () => {
     localStorage.clear()
   })
 
-  it('shows the demo profile, menu rows and an honest About response', async () => {
+  it('shows the signed-in account and menu rows, including About', async () => {
     const user = userEvent.setup()
     renderScreen()
 
@@ -35,9 +39,10 @@ describe('ProfileScreen', () => {
     expect(
       screen.getByRole('img', { name: 'Profile image placeholder' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('Sahan Nimnaka')).toBeInTheDocument()
+    expect(screen.getByText('Sahan Perera')).toBeInTheDocument()
+    expect(screen.getByText('sahan@example.com')).toBeInTheDocument()
     expect(
-      screen.getByText('Demo profile — no account is signed in.'),
+      screen.getByText('Signed in as sahan@example.com.'),
     ).toBeInTheDocument()
 
     for (const label of [
@@ -51,14 +56,16 @@ describe('ProfileScreen', () => {
     }
 
     await user.click(screen.getByRole('button', { name: 'About' }))
-    expect(
-      screen.getByText('About details are not included in this build.'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('About destination')).toBeInTheDocument()
   })
 
-  it('edits the demo name locally with validation', async () => {
+  it('edits the local demo name with validation', async () => {
     const user = userEvent.setup()
-    renderScreen()
+    renderScreen({
+      user: null,
+      status: 'unauthenticated',
+      isAuthenticated: false,
+    })
 
     await user.click(screen.getByRole('button', { name: 'Edit profile' }))
     const nameInput = screen.getByLabelText('Full name')
@@ -79,6 +86,28 @@ describe('ProfileScreen', () => {
       window.localStorage.getItem(APP_STATE_STORAGE_KEY) ?? '{}',
     )
     expect(stored.profile.fullName).toBe('Demo Cook')
+  })
+
+  it('signs out through auth context and returns to login', async () => {
+    const user = userEvent.setup()
+    let resolveLogout: () => void = () => {}
+    const logout = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLogout = resolve
+        }),
+    )
+    renderScreen({ logout })
+
+    const signOut = screen.getByRole('button', { name: 'Sign out' })
+    await user.click(signOut)
+
+    expect(screen.getByText('Signing out…')).toBeInTheDocument()
+    expect(signOut).toBeDisabled()
+    expect(logout).toHaveBeenCalledTimes(1)
+
+    resolveLogout()
+    expect(await screen.findByText('Login destination')).toBeInTheDocument()
   })
 
   it('navigates from the menu to Cooking Preferences', async () => {

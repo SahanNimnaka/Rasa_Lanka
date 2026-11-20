@@ -64,10 +64,11 @@ export function CookingInstructionsScreen() {
       <header className="flex min-h-11 items-center" />
 
       <section>
-        <h1 className="text-xl font-bold" id="cooking-title">
+        <p className="eyebrow-label">Let&apos;s cook</p>
+        <h1 className="mt-1 text-xl font-extrabold" id="cooking-title">
           {recipe.name}
         </h1>
-        <h2 className="mt-2 text-[1.25rem] font-bold leading-7 text-forest-green">
+        <h2 className="mt-2 text-[1.25rem] font-bold leading-7 text-ink">
           Step-by-Step Cooking Instructions
         </h2>
         <p className="mt-2 text-xs text-muted">
@@ -94,20 +95,21 @@ export function CookingInstructionsScreen() {
           )}
 
           {activeTab === 'instructions' && (
-            <div className="grid gap-3">
-              {steps.map((step, index) => (
-                <CookingStepCard
-                  isCurrent={index === currentIndex}
-                  key={step.id}
-                  onNext={
-                    index === currentIndex && !isComplete
-                      ? handleNext
-                      : undefined
-                  }
-                  step={step}
-                />
-              ))}
-
+            <>
+              <div className="grid gap-3 md:grid-cols-2 md:gap-5">
+                {steps.map((step, index) => (
+                  <CookingStepCard
+                    isCurrent={index === currentIndex}
+                    key={step.id}
+                    onNext={
+                      index === currentIndex && !isComplete
+                        ? handleNext
+                        : undefined
+                    }
+                    step={step}
+                  />
+                ))}
+              </div>
               <CookingStepNavigation
                 currentIndex={currentIndex}
                 isComplete={isComplete}
@@ -119,7 +121,7 @@ export function CookingInstructionsScreen() {
               {isComplete && (
                 <Card
                   aria-live="polite"
-                  className="border-fresh-green bg-fresh-green/10 text-center"
+                  className="border-fresh-green/40 bg-gradient-to-br from-warm-cream to-white text-center"
                 >
                   <CheckCircle2
                     aria-hidden="true"
@@ -139,7 +141,7 @@ export function CookingInstructionsScreen() {
                   </Button>
                 </Card>
               )}
-            </div>
+            </>
           )}
 
           {activeTab === 'video' && (

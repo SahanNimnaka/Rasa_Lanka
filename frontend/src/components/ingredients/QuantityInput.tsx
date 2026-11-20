@@ -28,10 +28,7 @@ export function QuantityInput({
 
   return (
     <div className="grid min-w-0 grid-cols-1 gap-2">
-      <label
-        className="text-sm font-semibold text-forest-green"
-        htmlFor={inputId}
-      >
+      <label className="text-sm font-semibold text-ink" htmlFor={inputId}>
         {label}
       </label>
       <div className="flex min-w-0 gap-2">
@@ -40,7 +37,7 @@ export function QuantityInput({
           aria-invalid={error ? true : undefined}
           aria-label={`Quantity for ${label}`}
           className={cn(
-            'min-w-0 flex-1 rounded-control border border-forest-green/20 bg-white px-3 py-2 text-base text-forest-green focus:border-fresh-green focus:outline-none focus:ring-2 focus:ring-fresh-green/25',
+            'min-w-0 flex-1 rounded-control border border-forest-green/20 bg-white px-3 py-2 text-base text-ink focus:border-fresh-green focus:outline-none focus:ring-2 focus:ring-fresh-green/25',
             error &&
               'border-chilli-red focus:border-chilli-red focus:ring-chilli-red/25',
           )}
@@ -52,7 +49,7 @@ export function QuantityInput({
         />
         <select
           aria-label={`Unit for ${label}`}
-          className="w-[86px] shrink-0 rounded-control border border-forest-green/20 bg-white px-2 py-2 text-sm text-forest-green focus:border-fresh-green focus:outline-none focus:ring-2 focus:ring-fresh-green/25"
+          className="w-[86px] shrink-0 rounded-control border border-forest-green/20 bg-white px-2 py-2 text-sm text-ink focus:border-fresh-green focus:outline-none focus:ring-2 focus:ring-fresh-green/25"
           onChange={(event) =>
             onUnitChange(event.target.value as MeasurementUnit)
           }

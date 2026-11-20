@@ -19,7 +19,7 @@ export function FeaturePlaceholderScreen({
   return (
     <MobileScreen aria-labelledby="placeholder-title">
       <ScreenHeader onBack={goBack} />
-      <section className="mt-8 text-center">
+      <section className="glass-panel mt-8 rounded-3xl p-8 text-center">
         <p className="text-xs font-bold uppercase tracking-wider text-spice-orange">
           Placeholder
         </p>

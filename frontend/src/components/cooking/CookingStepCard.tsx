@@ -18,45 +18,37 @@ export function CookingStepCard({
       aria-current={isCurrent ? 'step' : undefined}
       aria-label={`Step ${step.number}: ${step.title}`}
       className={cn(
-        'p-3 transition-colors',
-        isCurrent && 'border-fresh-green bg-warm-cream/60 shadow-elevated',
+        'flex items-center gap-3 rounded-2xl p-3 transition-all duration-200',
+        isCurrent
+          ? 'border-fresh-green/40 bg-gradient-to-r from-warm-cream/90 to-white/90 shadow-elevated'
+          : 'opacity-85',
       )}
       role="article"
     >
-      <div className="flex gap-3">
-        <span
-          aria-hidden="true"
-          className={cn(
-            'shrink-0 text-lg font-bold',
-            isCurrent ? 'text-spice-orange' : 'text-progress-track',
-          )}
-        >
-          {String(step.number).padStart(2, '0')}
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-bold text-forest-green">{step.title}</h3>
-          <div className="mt-2 flex gap-3">
-            <img
-              alt={step.imageAlt}
-              className="h-16 w-16 shrink-0 rounded-lg bg-warm-cream object-cover"
-              height={64}
-              loading="lazy"
-              src={step.image}
-              width={64}
-            />
-            <p className="text-xs leading-5 text-muted">{step.description}</p>
-          </div>
-          {isCurrent && onNext && (
-            <button
-              className="mt-2 text-xs font-bold text-fresh-green hover:text-forest-green"
-              onClick={onNext}
-              type="button"
-            >
-              Next
-            </button>
-          )}
-        </div>
+      <span
+        aria-hidden="true"
+        className={cn(
+          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-extrabold',
+          isCurrent
+            ? 'bg-gradient-to-br from-[#FF8A00] to-[#F6B73C] text-white shadow-md'
+            : 'bg-warm-cream text-muted',
+        )}
+      >
+        {String(step.number).padStart(2, '0')}
+      </span>
+      <div className="min-w-0 flex-1">
+        <h3 className="text-sm font-bold text-ink">{step.title}</h3>
+        <p className="mt-1 text-xs leading-5 text-muted">{step.description}</p>
       </div>
+      {isCurrent && onNext && (
+        <button
+          className="shrink-0 rounded-full bg-forest-green px-3 py-2 text-[11px] font-bold text-white transition-transform hover:scale-105"
+          onClick={onNext}
+          type="button"
+        >
+          Next
+        </button>
+      )}
     </Card>
   )
 }

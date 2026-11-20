@@ -19,12 +19,12 @@ export function RecipeFilters({
   return (
     <section
       aria-label="Recipe filters"
-      className="mt-3 rounded-card border border-forest-green/15 bg-warm-cream/50 p-3"
+      className="glass-panel mt-3 rounded-2xl p-4"
     >
-      <h2 className="text-sm font-bold text-forest-green">Filter recipes</h2>
+      <h2 className="text-sm font-bold text-ink">Filter recipes</h2>
       <div className="mt-3 grid gap-3">
         <label
-          className="flex items-center gap-2 text-sm text-forest-green"
+          className="flex items-center gap-2 text-sm text-ink"
           htmlFor={highMatchId}
         >
           <input
@@ -39,7 +39,7 @@ export function RecipeFilters({
           High match (80% or more)
         </label>
         <label
-          className="flex items-center gap-2 text-sm text-forest-green"
+          className="flex items-center gap-2 text-sm text-ink"
           htmlFor={quickId}
         >
           <input

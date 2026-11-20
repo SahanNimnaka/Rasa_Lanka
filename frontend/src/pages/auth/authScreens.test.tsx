@@ -1,35 +1,80 @@
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
+import type { AuthContextValue } from '../../context/authStore'
+import type { AuthUser } from '../../types/auth'
+import {
+  duplicateEmailError,
+  invalidCredentialsError,
+  testUser,
+} from '../../test/authFixtures'
+import { renderWithAuth } from '../../test/authTestUtils'
 import { LoginScreen } from './LoginScreen'
 import { RegisterScreen } from './RegisterScreen'
 
-function renderLogin() {
-  render(
-    <MemoryRouter>
-      <LoginScreen />
+interface RenderOptions {
+  initialEntry?: string | { pathname: string; state?: Record<string, unknown> }
+  authOverrides?: Partial<AuthContextValue>
+}
+
+function renderScreen(
+  screenComponent: typeof LoginScreen | typeof RegisterScreen,
+  { initialEntry = '/login', authOverrides = {} }: RenderOptions = {},
+) {
+  const ScreenComponent = screenComponent
+
+  return renderWithAuth(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route element={<ScreenComponent />} path="/login" />
+        <Route element={<ScreenComponent />} path="/register" />
+        <Route element={<p>Destination: /home</p>} path="/home" />
+        <Route element={<p>Destination: /profile</p>} path="/profile" />
+      </Routes>
     </MemoryRouter>,
+    authOverrides,
   )
 }
 
-function renderRegister() {
-  render(
-    <MemoryRouter>
-      <RegisterScreen />
-    </MemoryRouter>,
-  )
+function renderLogin(options: RenderOptions = {}) {
+  return renderScreen(LoginScreen, {
+    initialEntry: '/login',
+    ...options,
+  })
+}
+
+function renderRegister(options: RenderOptions = {}) {
+  return renderScreen(RegisterScreen, {
+    initialEntry: '/register',
+    ...options,
+  })
+}
+
+async function fillLoginForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText('Email'), 'sahan@example.com')
+  await user.type(screen.getByLabelText('Password'), 'password123')
+}
+
+async function fillRegisterForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText('Full Name'), 'Sahan Perera')
+  await user.type(screen.getByLabelText('Email'), 'sahan@example.com')
+  await user.type(screen.getByLabelText('Password'), 'password123')
+  await user.type(screen.getByLabelText('Confirm Password'), 'password123')
+  await user.click(screen.getByRole('checkbox'))
 }
 
 describe('LoginScreen', () => {
   it('validates required fields and email format without signing in', async () => {
     const user = userEvent.setup()
-    renderLogin()
+    const login = vi.fn().mockResolvedValue(testUser)
+    renderLogin({ authOverrides: { login } })
 
     await user.click(screen.getByRole('button', { name: 'Login' }))
 
     expect(await screen.findByText('Email is required')).toBeInTheDocument()
     expect(screen.getByText('Password is required')).toBeInTheDocument()
+    expect(login).not.toHaveBeenCalled()
 
     await user.type(screen.getByLabelText('Email'), 'not-an-email')
     await user.type(screen.getByLabelText('Password'), 'password123')
@@ -38,27 +83,76 @@ describe('LoginScreen', () => {
     expect(
       await screen.findByText('Enter a valid email address'),
     ).toBeInTheDocument()
-    expect(
-      screen.queryByText(
-        'Authentication is not connected yet, so no sign-in was attempted.',
-      ),
-    ).not.toBeInTheDocument()
+    expect(login).not.toHaveBeenCalled()
   })
 
-  it('shows an authentication placeholder after a locally valid form', async () => {
+  it('signs in through auth context and navigates home', async () => {
     const user = userEvent.setup()
-    renderLogin()
+    const login = vi.fn().mockResolvedValue(testUser)
+    renderLogin({ authOverrides: { login } })
 
-    await user.type(screen.getByLabelText('Email'), 'sahan@example.com')
-    await user.type(screen.getByLabelText('Password'), 'password123')
+    await fillLoginForm(user)
     await user.click(screen.getByRole('button', { name: 'Login' }))
 
-    expect(
-      await screen.findByRole('status', {
-        name: '',
-      }),
-    ).toHaveTextContent('Authentication is not connected yet')
-    expect(screen.queryByRole('heading', { name: 'Welcome, Sahan' })).toBeNull()
+    expect(await screen.findByText('Destination: /home')).toBeInTheDocument()
+    expect(login).toHaveBeenCalledWith({
+      email: 'sahan@example.com',
+      password: 'password123',
+    })
+  })
+
+  it('returns to the protected destination preserved before login', async () => {
+    const user = userEvent.setup()
+    const login = vi.fn().mockResolvedValue(testUser)
+    renderLogin({
+      initialEntry: {
+        pathname: '/login',
+        state: { from: { pathname: '/profile' } },
+      },
+      authOverrides: { login },
+    })
+
+    await fillLoginForm(user)
+    await user.click(screen.getByRole('button', { name: 'Login' }))
+
+    expect(await screen.findByText('Destination: /profile')).toBeInTheDocument()
+  })
+
+  it('shows a generic backend authentication error', async () => {
+    const user = userEvent.setup()
+    const login = vi.fn().mockRejectedValue(invalidCredentialsError())
+    renderLogin({ authOverrides: { login } })
+
+    await fillLoginForm(user)
+    await user.click(screen.getByRole('button', { name: 'Login' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'The provided credentials are incorrect.',
+    )
+    expect(screen.queryByText('Destination: /home')).not.toBeInTheDocument()
+  })
+
+  it('shows a loading state and prevents duplicate login submissions', async () => {
+    const user = userEvent.setup()
+    let resolveLogin: (user: AuthUser) => void = () => {}
+    const login = vi.fn(
+      () =>
+        new Promise<AuthUser>((resolve) => {
+          resolveLogin = resolve
+        }),
+    )
+    renderLogin({ authOverrides: { login } })
+
+    await fillLoginForm(user)
+    const submit = screen.getByRole('button', { name: 'Login' })
+    await user.click(submit)
+
+    expect(submit).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Signing in…')
+    expect(login).toHaveBeenCalledTimes(1)
+
+    resolveLogin(testUser)
+    expect(await screen.findByText('Destination: /home')).toBeInTheDocument()
   })
 
   it('toggles password visibility', async () => {
@@ -94,7 +188,8 @@ describe('LoginScreen', () => {
 describe('RegisterScreen', () => {
   it('validates every required field, password rules, confirmation and terms', async () => {
     const user = userEvent.setup()
-    renderRegister()
+    const register = vi.fn().mockResolvedValue(testUser)
+    renderRegister({ authOverrides: { register } })
 
     await user.click(screen.getByRole('button', { name: 'Sign up' }))
 
@@ -105,6 +200,7 @@ describe('RegisterScreen', () => {
     expect(
       screen.getByText('Accept the Terms and Privacy Policy to continue'),
     ).toBeInTheDocument()
+    expect(register).not.toHaveBeenCalled()
 
     await user.type(screen.getByLabelText('Full Name'), 'Sahan Perera')
     await user.type(screen.getByLabelText('Email'), 'sahan@example.com')
@@ -118,9 +214,10 @@ describe('RegisterScreen', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('rejects weak passwords and accepts a locally valid form without creating an account', async () => {
+  it('rejects weak passwords before calling the API', async () => {
     const user = userEvent.setup()
-    renderRegister()
+    const register = vi.fn().mockResolvedValue(testUser)
+    renderRegister({ authOverrides: { register } })
 
     await user.type(screen.getByLabelText('Full Name'), 'Sahan Perera')
     await user.type(screen.getByLabelText('Email'), 'sahan@example.com')
@@ -132,16 +229,61 @@ describe('RegisterScreen', () => {
     expect(
       await screen.findByText('Use at least 8 characters'),
     ).toBeInTheDocument()
+    expect(register).not.toHaveBeenCalled()
+  })
 
-    await user.clear(screen.getByLabelText('Password'))
-    await user.type(screen.getByLabelText('Password'), 'password123')
-    await user.clear(screen.getByLabelText('Confirm Password'))
-    await user.type(screen.getByLabelText('Confirm Password'), 'password123')
+  it('creates an account through auth context and navigates home', async () => {
+    const user = userEvent.setup()
+    const register = vi.fn().mockResolvedValue(testUser)
+    renderRegister({ authOverrides: { register } })
+
+    await fillRegisterForm(user)
     await user.click(screen.getByRole('button', { name: 'Sign up' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Account creation is not connected yet',
+    expect(await screen.findByText('Destination: /home')).toBeInTheDocument()
+    expect(register).toHaveBeenCalledWith({
+      name: 'Sahan Perera',
+      email: 'sahan@example.com',
+      password: 'password123',
+      password_confirmation: 'password123',
+    })
+  })
+
+  it('shows duplicate-email validation on the correct field', async () => {
+    const user = userEvent.setup()
+    const register = vi.fn().mockRejectedValue(duplicateEmailError())
+    renderRegister({ authOverrides: { register } })
+
+    await fillRegisterForm(user)
+    await user.click(screen.getByRole('button', { name: 'Sign up' }))
+
+    expect(
+      await screen.findByText('The email has already been taken.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Destination: /home')).not.toBeInTheDocument()
+  })
+
+  it('shows a loading state and prevents duplicate registration submissions', async () => {
+    const user = userEvent.setup()
+    let resolveRegister: (user: AuthUser) => void = () => {}
+    const register = vi.fn(
+      () =>
+        new Promise<AuthUser>((resolve) => {
+          resolveRegister = resolve
+        }),
     )
+    renderRegister({ authOverrides: { register } })
+
+    await fillRegisterForm(user)
+    const submit = screen.getByRole('button', { name: 'Sign up' })
+    await user.click(submit)
+
+    expect(submit).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Creating account…')
+    expect(register).toHaveBeenCalledTimes(1)
+
+    resolveRegister(testUser)
+    expect(await screen.findByText('Destination: /home')).toBeInTheDocument()
   })
 
   it('toggles both password fields independently', async () => {

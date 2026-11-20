@@ -28,16 +28,21 @@ export function BrandLogo({
   return (
     <div className={cn('inline-flex items-center gap-3', className)} {...props}>
       {src && (
-        <img
-          alt={imageAlt}
-          className={cn('shrink-0 object-contain', imageSize.className)}
-          height={imageSize.dimension}
-          src={src}
-          width={imageSize.dimension}
-        />
+        <span className="logo-glow inline-flex shrink-0">
+          <img
+            alt={imageAlt}
+            className={cn(
+              'relative object-contain drop-shadow-sm',
+              imageSize.className,
+            )}
+            height={imageSize.dimension}
+            src={src}
+            width={imageSize.dimension}
+          />
+        </span>
       )}
       {showWordmark && (
-        <span className="font-display text-xl font-bold tracking-tight text-forest-green">
+        <span className="brand-wordmark font-display bg-gradient-to-r from-[#1F2328] to-[#4B5563] bg-clip-text text-xl font-extrabold tracking-tight text-transparent">
           RasaLanka
         </span>
       )}

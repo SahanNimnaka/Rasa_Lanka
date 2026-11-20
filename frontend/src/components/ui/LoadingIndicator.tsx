@@ -13,11 +13,11 @@ export function LoadingIndicator({
     <div className="flex flex-col items-center">
       <div
         aria-hidden="true"
-        className="h-1 w-40 overflow-hidden border border-progress-track bg-white"
+        className="h-1.5 w-40 overflow-hidden rounded-full bg-forest-green/10"
       >
         <motion.div
           animate={{ scaleX: 0.5 }}
-          className="h-full w-full origin-left bg-muted"
+          className="progress-fill h-full w-full origin-left"
           initial={prefersReducedMotion ? false : { scaleX: 0 }}
           transition={{
             delay: prefersReducedMotion ? 0 : 0.15,

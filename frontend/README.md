@@ -20,6 +20,46 @@ The PWA manifest and Workbox service worker are configured in `vite.config.ts`.
 The generated manifest includes standard and maskable Android icons; the Apple
 touch icon is linked in `index.html`.
 
+## Authentication
+
+The frontend uses Laravel Sanctum SPA cookie authentication. Copy
+`.env.example` to `.env` and set the Laravel backend origin:
+
+```dotenv
+VITE_API_URL=http://127.0.0.1:8000
+```
+
+`VITE_API_URL` is the backend origin only; the API client appends `/api/v1` and
+`/sanctum/csrf-cookie` itself. Axios runs with `withCredentials` and
+`withXSRFToken`; state-changing requests call `/sanctum/csrf-cookie` first.
+Authentication state lives only in React memory. No token is stored in
+`localStorage` or `sessionStorage`.
+
+Public screens remain accessible without signing in. Personal screens
+(`/profile`, `/saved`, `/history`, `/preferences`, `/settings`) redirect to
+`/login` and preserve the intended destination.
+
+## Recipe detail data
+
+`RecipeDetailsScreen` loads `GET /api/v1/recipes/{id}` through the shared
+`useRecipe(id)` hook. It validates the numeric route ID and shows explicit
+invalid, loading, error/retry, and not-found states; it never falls back to the
+mock recipe catalogue. Source quantities, units, approval status, requirement
+labels, preparation notes, estimated/derived flags, data-quality warnings,
+method summaries, numbered instructions, and recipe sources are displayed as
+provided. Locally entered quantities from the cooking flow are shown alongside
+API values without mutating query data. Images, ratings, match percentages,
+availability, and nutrition are not invented; the existing image and video
+placeholders remain.
+
+The cooking screens are intentionally unchanged: `CookingGuidanceScreen` and
+`CookingInstructionsScreen` still read the mock catalogue through
+`getRecipeById`/`getDefaultRecipe`, and `CookingInstructionsScreen` still uses
+`applyUserQuantities` for locally entered values. Saved Recipes, History,
+recognition, and quantity-entry workflows also remain mock/local. Because
+History still depends on the mock catalogue, opening an API-backed recipe
+detail does not add a History entry yet.
+
 ## Theme
 
 Tailwind CSS exposes `forest-green`, `fresh-green`, `spice-orange`,

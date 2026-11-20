@@ -1,0 +1,14 @@
+Metric,Count,Finding
+Source workbooks,8,All eight final completed Excel workbooks opened successfully.
+Recipe records,20,Unique recipe IDs across all categories.
+Recipe-ingredient records,337,One row per ingredient used in a recipe.
+Distinct ingredient names,116,Normalized by lowercasing and whitespace cleanup only.
+Categories,8,"Potato, Brinjal, Chicken, Fish, Jackfruit, Parippu, Polos, Pumpkin."
+Blank cells in source dataset,0,"Checked with literal strings preserved; 'N/A' is a deliberate text value, not an empty cell."
+Duplicate Ingredient_ID,0,No duplicate ingredient-row identifiers.
+Recipes with exactly one main ingredient,20,All recipes have exactly one main ingredient row.
+Recipes with estimated times,11,See recipe flags and Data_Quality_Status.
+Recipes with estimated serving yield,4,"Includes POT-005, whose prior assumed yield was not explicitly flagged."
+Ingredient category conflicts,7,Seven names have multiple category labels.
+Recipe time arithmetic mismatches,2,Needs source review; total time may include rest/marinating.
+Expert-approved serving quantities,0,All 337 remain pending expert validation; do not treat estimates as approved.

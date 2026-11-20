@@ -394,7 +394,7 @@ export function CameraScreen() {
         {notice && (
           <p
             aria-live="polite"
-            className="absolute inset-x-6 bottom-40 z-30 rounded-lg bg-white/95 px-3 py-2 text-center text-sm text-forest-green shadow-card"
+            className="absolute inset-x-6 bottom-40 z-30 rounded-lg bg-white/95 px-3 py-2 text-center text-sm text-ink shadow-card"
             role="status"
           >
             {notice}

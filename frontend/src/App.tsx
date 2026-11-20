@@ -1,4 +1,5 @@
 import { useCallback, useEffect, type ReactNode } from 'react'
+import { QueryClientProvider } from '@tanstack/react-query'
 import {
   BrowserRouter,
   Navigate,
@@ -9,8 +10,10 @@ import {
   useParams,
 } from 'react-router-dom'
 import { AppStateProvider } from './context/AppStateContext'
+import { AuthProvider } from './context/AuthProvider'
 import { CookingFlowProvider } from './context/CookingFlowContext'
 import { useAppState } from './context/appStateStore'
+import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CookingGuidanceScreen } from './pages/cooking/CookingGuidanceScreen'
 import { CookingInstructionsScreen } from './pages/cooking/CookingInstructionsScreen'
 import { OnboardingScreen } from './pages/onboarding/OnboardingScreen'
@@ -31,7 +34,9 @@ import { HistoryScreen } from './pages/history/HistoryScreen'
 import { ProfileScreen } from './pages/profile/ProfileScreen'
 import { CookingPreferencesScreen } from './pages/preferences/CookingPreferencesScreen'
 import { SettingsScreen } from './pages/settings/SettingsScreen'
+import { AboutScreen } from './pages/about/AboutScreen'
 import { FeaturePlaceholderScreen } from './pages/placeholders/FeaturePlaceholderScreen'
+import { queryClient } from './lib/queryClient'
 import { getRecipeById } from './services/mockRecipeService'
 
 function SplashRoute() {
@@ -120,11 +125,47 @@ function AppRouteViews() {
       />
 
       <Route element={<SearchScreen />} path="/search" />
-      <Route element={<SavedRecipesScreen />} path="/saved" />
-      <Route element={<ProfileScreen />} path="/profile" />
-      <Route element={<HistoryScreen />} path="/history" />
-      <Route element={<CookingPreferencesScreen />} path="/preferences" />
-      <Route element={<SettingsScreen />} path="/settings" />
+      <Route
+        element={
+          <ProtectedRoute>
+            <SavedRecipesScreen />
+          </ProtectedRoute>
+        }
+        path="/saved"
+      />
+      <Route
+        element={
+          <ProtectedRoute>
+            <ProfileScreen />
+          </ProtectedRoute>
+        }
+        path="/profile"
+      />
+      <Route
+        element={
+          <ProtectedRoute>
+            <HistoryScreen />
+          </ProtectedRoute>
+        }
+        path="/history"
+      />
+      <Route
+        element={
+          <ProtectedRoute>
+            <CookingPreferencesScreen />
+          </ProtectedRoute>
+        }
+        path="/preferences"
+      />
+      <Route
+        element={
+          <ProtectedRoute>
+            <SettingsScreen />
+          </ProtectedRoute>
+        }
+        path="/settings"
+      />
+      <Route element={<AboutScreen />} path="/about" />
       <Route
         element={
           <FeaturePlaceholderScreen
@@ -137,7 +178,7 @@ function AppRouteViews() {
       <Route
         element={
           <FeaturePlaceholderScreen
-            description="Password recovery will be available when authentication is connected."
+            description="Password recovery is not available yet."
             title="Forgot Password"
           />
         }
@@ -151,11 +192,15 @@ function AppRouteViews() {
 
 export function AppRoutes() {
   return (
-    <CookingFlowProvider>
-      <AppStateProvider>
-        <AppRouteViews />
-      </AppStateProvider>
-    </CookingFlowProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <CookingFlowProvider>
+          <AppStateProvider>
+            <AppRouteViews />
+          </AppStateProvider>
+        </CookingFlowProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   )
 }
 

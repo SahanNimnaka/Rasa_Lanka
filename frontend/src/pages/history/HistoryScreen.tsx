@@ -5,6 +5,7 @@ import { MobileScreen } from '../../components/layout/MobileScreen'
 import { ScreenHeader } from '../../components/layout/ScreenHeader'
 import { Button } from '../../components/ui/Button'
 import { Card } from '../../components/ui/Card'
+import { WireframeImagePlaceholder } from '../../components/ui/WireframeImagePlaceholder'
 import { useAppState } from '../../context/appStateStore'
 import { useNavigateBack } from '../../hooks/useNavigateBack'
 import { formatViewedAt } from '../../services/appStateService'
@@ -41,23 +42,24 @@ export function HistoryScreen() {
     <MobileScreen aria-labelledby="history-title" className="pb-12">
       <ScreenHeader onBack={goBack} />
 
-      <h1 className="mt-2 text-2xl font-bold" id="history-title">
+      <p className="eyebrow-label mt-2">Recently explored</p>
+      <h1
+        className="mt-1 text-[28px] leading-tight font-extrabold"
+        id="history-title"
+      >
         History
       </h1>
 
       <section aria-labelledby="recently-viewed-title" className="mt-8">
-        <h2 className="text-lg font-bold" id="recently-viewed-title">
+        <h2 className="text-base font-bold" id="recently-viewed-title">
           Recently Viewed
         </h2>
         <p className="mt-2 text-sm text-muted">
           Recipes you explored recently.
         </p>
-        <p className="mt-1 text-xs text-muted">
-          History is stored locally on this device.
-        </p>
 
         {entries.length === 0 ? (
-          <div className="mt-8 rounded-card border border-dashed border-forest-green/20 p-6 text-center">
+          <div className="glass-panel mt-8 rounded-2xl p-6 text-center">
             <h3 className="text-base font-bold">Your history is empty</h3>
             <p className="mt-2 text-sm leading-6 text-muted">
               Open a recipe to add it to this list.
@@ -71,33 +73,24 @@ export function HistoryScreen() {
             </Button>
           </div>
         ) : (
-          <div className="mt-5 grid gap-4">
+          <div className="mt-5 grid gap-3 md:grid-cols-2 md:gap-5">
             {entries.map(({ entry, recipe }) => (
               <button
-                className="w-full text-left"
+                className="glass-panel flex w-full items-center gap-4 rounded-2xl p-2.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-elevated"
                 key={entry.id}
                 onClick={() => navigate(`/recipes/${recipe.id}`)}
                 type="button"
               >
-                <Card className="flex items-center gap-4 p-3 transition-shadow hover:shadow-elevated">
-                  <img
-                    alt={recipe.name}
-                    className="h-[88px] w-[88px] shrink-0 rounded-lg bg-warm-cream object-cover"
-                    height={88}
-                    loading="lazy"
-                    src={recipe.image}
-                    width={88}
-                  />
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-bold text-forest-green">
-                      {recipe.name}
-                    </span>
-                    <span className="mt-2 flex items-center gap-1 text-xs text-muted">
-                      <Clock3 aria-hidden="true" size={13} />
-                      {formatViewedAt(entry.viewedAt)}
-                    </span>
+                <WireframeImagePlaceholder className="h-[88px] w-[88px]" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold text-ink">
+                    {recipe.name}
                   </span>
-                </Card>
+                  <span className="mt-2 flex items-center gap-1 text-xs text-muted">
+                    <Clock3 aria-hidden="true" size={13} />
+                    {formatViewedAt(entry.viewedAt)}
+                  </span>
+                </span>
               </button>
             ))}
           </div>
@@ -117,7 +110,7 @@ export function HistoryScreen() {
           </Button>
         ) : (
           <Card
-            className="border-chilli-red/40 bg-chilli-red/5"
+            className="rounded-lg border-chilli-red/40 bg-chilli-red/5 shadow-none"
             role="alertdialog"
           >
             <h2 className="text-base font-bold">Delete all history?</h2>
@@ -139,7 +132,7 @@ export function HistoryScreen() {
         )}
       </div>
 
-      <p aria-live="polite" className="mt-3 text-center text-xs text-muted">
+      <p aria-live="polite" className="sr-only">
         {status}
       </p>
     </MobileScreen>

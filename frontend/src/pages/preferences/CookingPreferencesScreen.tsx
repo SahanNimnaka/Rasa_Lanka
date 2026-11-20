@@ -12,7 +12,7 @@ import type {
   SpiceLevel,
 } from '../../types/appState'
 
-const DIETARY_OPTIONS: DietaryPreference[] = ['none', 'vegetarian', 'vegan']
+const DIETARY_OPTIONS: DietaryPreference[] = ['none', 'vegan', 'vegetarian']
 const SPICE_OPTIONS: SpiceLevel[] = ['mild', 'medium', 'spicy']
 const CUISINE_OPTIONS: CuisineType[] = ['Sri Lankan', 'Other Asian']
 
@@ -66,86 +66,98 @@ export function CookingPreferencesScreen() {
     <MobileScreen aria-labelledby="preferences-title" className="pb-12">
       <ScreenHeader onBack={goBack} />
 
-      <h1 className="mt-2 text-2xl font-bold" id="preferences-title">
+      <p className="eyebrow-label mt-2">Make it yours</p>
+      <h1 className="mt-1 text-[28px] font-extrabold" id="preferences-title">
         Cooking Preferences
       </h1>
       <p className="mt-2 text-sm text-muted">Choose how you like to cook.</p>
 
-      <section aria-labelledby="dietary-title" className="mt-8">
-        <h2 className="text-sm font-bold text-forest-green" id="dietary-title">
-          Dietary Preference
-        </h2>
-        <div
-          aria-label="Dietary preference"
-          className="mt-3 grid grid-cols-3 gap-2"
-          role="group"
+      <div className="lg:grid lg:grid-cols-2 lg:gap-5">
+        <section
+          aria-labelledby="dietary-title"
+          className="glass-panel mt-6 rounded-2xl p-4 lg:mt-0"
         >
-          {DIETARY_OPTIONS.map((option) => (
-            <ChoiceChip
-              key={option}
-              label={DIETARY_LABELS[option]}
-              onClick={() => {
-                setDraft((current) => ({ ...current, dietary: option }))
-                setError('')
-              }}
-              selected={draft.dietary === option}
-            />
-          ))}
-        </div>
-      </section>
+          <h2 className="text-sm font-bold text-ink" id="dietary-title">
+            Dietary Preference
+          </h2>
+          <div
+            aria-label="Dietary preference"
+            className="mt-3 grid grid-cols-3 gap-2"
+            role="group"
+          >
+            {DIETARY_OPTIONS.map((option) => (
+              <ChoiceChip
+                key={option}
+                label={DIETARY_LABELS[option]}
+                onClick={() => {
+                  setDraft((current) => ({ ...current, dietary: option }))
+                  setError('')
+                }}
+                selected={draft.dietary === option}
+              />
+            ))}
+          </div>
+        </section>
 
-      <section aria-labelledby="spice-title" className="mt-8">
-        <h2 className="text-sm font-bold text-forest-green" id="spice-title">
-          Spice Level
-        </h2>
-        <div
-          aria-label="Spice level"
-          className="mt-3 grid grid-cols-3 gap-2"
-          role="group"
+        <section
+          aria-labelledby="spice-title"
+          className="glass-panel mt-5 rounded-2xl p-4"
         >
-          {SPICE_OPTIONS.map((option) => (
-            <ChoiceChip
-              key={option}
-              label={SPICE_LABELS[option]}
-              onClick={() => {
-                setDraft((current) => ({ ...current, spice: option }))
-                setError('')
-              }}
-              selected={draft.spice === option}
-            />
-          ))}
-        </div>
-      </section>
+          <h2 className="text-sm font-bold text-ink" id="spice-title">
+            Spice Level
+          </h2>
+          <div
+            aria-label="Spice level"
+            className="mt-3 grid grid-cols-3 gap-2"
+            role="group"
+          >
+            {SPICE_OPTIONS.map((option) => (
+              <ChoiceChip
+                key={option}
+                label={SPICE_LABELS[option]}
+                onClick={() => {
+                  setDraft((current) => ({ ...current, spice: option }))
+                  setError('')
+                }}
+                selected={draft.spice === option}
+              />
+            ))}
+          </div>
+        </section>
 
-      <section aria-labelledby="cuisine-title" className="mt-8">
-        <h2 className="text-sm font-bold text-forest-green" id="cuisine-title">
-          Preferred Cuisine
-        </h2>
-        <div
-          aria-label="Preferred cuisine"
-          className="mt-3 grid grid-cols-2 gap-2"
-          role="group"
+        <section
+          aria-labelledby="cuisine-title"
+          className="glass-panel mt-5 rounded-2xl p-4 lg:mt-0"
         >
-          {CUISINE_OPTIONS.map((option) => (
-            <ChoiceChip
-              key={option}
-              label={option}
-              onClick={() => {
-                setDraft((current) => ({ ...current, cuisine: option }))
-                setError('')
-              }}
-              selected={draft.cuisine === option}
-            />
-          ))}
-        </div>
-      </section>
+          <h2 className="text-sm font-bold text-ink" id="cuisine-title">
+            Preferred Cuisine
+          </h2>
+          <div
+            aria-label="Preferred cuisine"
+            className="mt-3 grid grid-cols-2 gap-2"
+            role="group"
+          >
+            {CUISINE_OPTIONS.map((option) => (
+              <ChoiceChip
+                key={option}
+                label={option}
+                onClick={() => {
+                  setDraft((current) => ({ ...current, cuisine: option }))
+                  setError('')
+                }}
+                selected={draft.cuisine === option}
+              />
+            ))}
+          </div>
+        </section>
+      </div>
 
       {error && (
         <p className="mt-6 text-sm font-medium text-chilli-red" role="alert">
           {error}
         </p>
       )}
-      <p aria-live="polite" className="mt-3 text-center text-xs text-muted">
+      <p aria-live="polite" className="sr-only">
         {status}
       </p>
 

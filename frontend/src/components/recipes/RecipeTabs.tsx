@@ -17,7 +17,7 @@ export function RecipeTabs({ activeTab, idPrefix, onChange }: RecipeTabsProps) {
   return (
     <div
       aria-label="Recipe sections"
-      className="mt-6 grid grid-cols-3 border-b border-forest-green/15"
+      className="mt-6 grid grid-cols-3 gap-1 rounded-2xl bg-warm-cream/70 p-1"
       role="tablist"
     >
       {TABS.map((tab) => {
@@ -27,10 +27,10 @@ export function RecipeTabs({ activeTab, idPrefix, onChange }: RecipeTabsProps) {
             aria-controls={`${idPrefix}-panel`}
             aria-selected={isActive}
             className={cn(
-              'min-h-11 border-b-2 px-1 text-sm font-semibold transition-colors',
+              'min-h-10 rounded-xl px-1 text-sm font-bold transition-all duration-200',
               isActive
-                ? 'border-spice-orange text-forest-green'
-                : 'border-transparent text-muted hover:text-forest-green',
+                ? 'bg-gradient-to-r from-[#2E7D32] to-[#0B3D2E] text-white shadow-md'
+                : 'text-muted hover:bg-white/70 hover:text-ink',
             )}
             id={`${idPrefix}-tab-${tab.id}`}
             key={tab.id}

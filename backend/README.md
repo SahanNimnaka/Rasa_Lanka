@@ -64,3 +64,29 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+
+## RasaLanka recipe import
+
+The recipe package is located at `database/rasalanka_import` by default. Validate it without writing to the database:
+
+```bash
+php artisan rasalanka:import-recipes
+```
+
+Dry-run is the default. To validate a package in another directory, pass the directory with `--file`:
+
+```bash
+php artisan rasalanka:import-recipes --file="C:\path\to\rasalanka_import"
+```
+
+Only run the transactional database import when you explicitly approve it:
+
+```bash
+php artisan rasalanka:import-recipes --commit
+```
+
+The importer retains source provenance, category conflicts, and each original ingredient requirement label. Unambiguous requirement labels map to `is_required`; ambiguous labels remain `NULL` and are preserved verbatim in `original_requirement_label`. Per-person and expert-approved quantities use `NUMERIC(12,5)` so the current source values are stored without rounding. Master-file aggregate estimate-flag inconsistencies are reported as audit findings and do not override individual source flags.
+
+The `data_quality_issues` table stores each audit CSV record, including its file and row, raw entity reference, severity, issue type, description, recommended action, and a resolution status that defaults to `unresolved`. Recipe and ingredient references are linked where they resolve to stable records. Re-imports update source details without resetting a previously changed resolution status. A field name is populated only when the issue identifies one unambiguous field; otherwise it remains `NULL`.
+
+PostgreSQL integration tests are opt-in and require `RASALANKA_TEST_PG_DATABASE` to name an isolated database beginning with `rasalanka_test_`. They migrate only that database. The additive recipe-quantity/label and data-quality migrations must be applied to the target database before committing an import. Review the dry-run report before any explicit commit.

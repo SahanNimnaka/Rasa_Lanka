@@ -13,7 +13,7 @@ export function BottomNavigation() {
   return (
     <nav
       aria-label="Primary navigation"
-      className="fixed inset-x-0 bottom-0 z-10 mx-auto w-full max-w-[430px] border-t border-forest-green/10 bg-[#FAFAFA] px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+      className="bottom-nav fixed inset-x-0 bottom-0 z-10 mx-auto w-full max-w-[430px] px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:hidden"
     >
       <ul className="grid grid-cols-4">
         {items.map(({ icon: Icon, label, to }) => (
@@ -21,10 +21,8 @@ export function BottomNavigation() {
             <NavLink
               className={({ isActive }) =>
                 cn(
-                  'flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-semibold transition-colors',
-                  isActive
-                    ? 'text-fresh-green'
-                    : 'text-forest-green/60 hover:text-forest-green',
+                  'bottom-nav-link flex min-h-12 flex-col items-center justify-center gap-1 px-1 text-[11px] font-semibold',
+                  isActive && 'font-bold',
                 )
               }
               to={to}

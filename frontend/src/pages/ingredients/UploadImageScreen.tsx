@@ -130,8 +130,9 @@ export function UploadImageScreen() {
     <MobileScreen aria-labelledby="upload-title">
       <ScreenHeader onBack={goBack} />
 
-      <section className="mt-3">
-        <h1 className="text-[1.75rem] font-bold" id="upload-title">
+      <section className="mt-3 lg:mx-auto lg:max-w-6xl">
+        <p className="eyebrow-label">Choose a photo</p>
+        <h1 className="mt-1 text-[1.8rem] font-extrabold" id="upload-title">
           Upload Image
         </h1>
 
@@ -147,12 +148,8 @@ export function UploadImageScreen() {
           type="button"
         >
           <Card className="flex min-h-[254px] flex-col items-center justify-center gap-3 bg-warm-cream/50 text-center">
-            <ImagePlus
-              aria-hidden="true"
-              className="text-forest-green"
-              size={38}
-            />
-            <span className="text-base font-semibold text-forest-green">
+            <ImagePlus aria-hidden="true" className="text-ink" size={38} />
+            <span className="text-base font-semibold text-ink">
               Image upload area
             </span>
             <span className="max-w-[16rem] text-sm text-muted">
@@ -196,7 +193,7 @@ export function UploadImageScreen() {
                 src={selected.dataUrl}
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-forest-green">
+                <p className="truncate text-sm font-semibold text-ink">
                   {selected.name ?? 'Selected image'}
                 </p>
                 <p className="mt-1 text-xs text-muted">
@@ -243,7 +240,7 @@ export function UploadImageScreen() {
               No recent images in this session.
             </p>
           ) : (
-            <ul className="mt-3 grid grid-cols-3 gap-3">
+            <ul className="mt-3 grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-5">
               {recentImages.map((image) => (
                 <li key={image.id}>
                   <button
@@ -263,7 +260,7 @@ export function UploadImageScreen() {
                           Preview unavailable
                         </span>
                       )}
-                      <span className="block truncate p-2 text-[11px] font-medium text-forest-green">
+                      <span className="block truncate p-2 text-[11px] font-medium text-ink">
                         {image.name}
                       </span>
                     </Card>

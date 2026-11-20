@@ -2,12 +2,11 @@ import type { ButtonHTMLAttributes } from 'react'
 import { cn } from '../../utils/cn'
 
 const variantClasses = {
-  primary: 'bg-fresh-green text-white hover:bg-forest-green',
-  secondary:
-    'border border-forest-green/20 bg-white text-forest-green hover:bg-warm-cream',
-  ghost: 'bg-transparent text-forest-green hover:bg-forest-green/5',
-  danger: 'bg-chilli-red text-white hover:bg-chilli-red/90',
-  ink: 'bg-ink text-white hover:bg-forest-green',
+  primary: 'btn-variant-primary',
+  secondary: 'btn-variant-secondary',
+  ghost: 'btn-variant-ghost',
+  danger: 'btn-variant-danger',
+  ink: 'btn-variant-ink',
 } as const
 
 const sizeClasses = {
@@ -31,7 +30,7 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-control font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-spice-orange focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all duration-200 focus-visible:ring-2 focus-visible:ring-spice-orange focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none disabled:shadow-none',
         variantClasses[variant],
         sizeClasses[size],
         className,

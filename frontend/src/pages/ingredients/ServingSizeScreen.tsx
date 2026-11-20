@@ -52,21 +52,23 @@ export function ServingSizeScreen() {
     <MobileScreen aria-labelledby="serving-size-title">
       <ScreenHeader onBack={goBack} />
 
-      <section className="mt-3 text-center">
-        <h1 className="text-[1.75rem] font-bold" id="serving-size-title">
+      <section className="mt-3 text-center lg:mx-auto lg:max-w-3xl">
+        <p className="eyebrow-label">Plan your meal</p>
+        <h1
+          className="mt-1 text-[1.8rem] font-extrabold"
+          id="serving-size-title"
+        >
           Serving Size
         </h1>
 
-        <Card className="mx-auto mt-16 flex h-[170px] w-full max-w-[244px] flex-col items-center justify-center gap-3 bg-warm-cream/50">
+        <Card className="glass-panel mx-auto mt-10 flex h-[170px] w-full max-w-[244px] flex-col items-center justify-center gap-3 rounded-3xl">
           <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-fresh-green shadow-card">
             <Users aria-hidden="true" size={28} />
           </span>
-          <p className="text-sm font-semibold text-forest-green">
-            Number of people
-          </p>
+          <p className="text-sm font-semibold text-ink">Number of people</p>
         </Card>
 
-        <h2 className="mx-auto mt-8 max-w-[290px] text-xl font-bold leading-8 text-forest-green">
+        <h2 className="mx-auto mt-8 max-w-[290px] text-xl font-bold leading-8 text-ink">
           How many people are you cooking for?
         </h2>
 
@@ -82,7 +84,7 @@ export function ServingSizeScreen() {
           </Button>
           <div aria-live="polite">
             <p
-              className="text-5xl font-bold text-forest-green"
+              className="serving-count bg-gradient-to-br from-[#1F2328] to-[#4B5563] bg-clip-text text-5xl font-extrabold text-transparent"
               data-testid="serving-count"
             >
               {servings}
@@ -101,9 +103,7 @@ export function ServingSizeScreen() {
         </div>
 
         <div className="mt-8 text-left">
-          <h3 className="text-sm font-bold text-forest-green">
-            Quick selection
-          </h3>
+          <h3 className="text-sm font-bold text-ink">Quick selection</h3>
           <div className="mt-3 grid grid-cols-6 gap-2">
             {QUICK_SERVINGS.map((option) => {
               const isSelected = option === servings
@@ -119,7 +119,7 @@ export function ServingSizeScreen() {
                     'min-h-11 rounded-control border text-sm font-semibold transition-colors',
                     isSelected
                       ? 'border-fresh-green bg-fresh-green text-white'
-                      : 'border-forest-green/20 bg-white text-forest-green hover:bg-warm-cream',
+                      : 'border-forest-green/20 bg-white text-ink hover:bg-warm-cream',
                   )}
                   key={option}
                   onClick={() => updateServings(option)}

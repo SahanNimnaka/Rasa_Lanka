@@ -23,10 +23,10 @@ export function RecipeIngredientList({
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-fresh-green/15 text-fresh-green">
                 <Check aria-hidden="true" size={14} />
               </span>
-              <span className="min-w-0 flex-1 text-sm text-forest-green">
+              <span className="min-w-0 flex-1 text-sm text-ink">
                 {ingredient.name}
               </span>
-              <span className="shrink-0 text-sm font-semibold text-forest-green">
+              <span className="shrink-0 text-sm font-semibold text-ink">
                 {formatQuantity(ingredient.quantity, ingredient.unit)}
               </span>
             </li>
@@ -44,10 +44,10 @@ export function RecipeIngredientList({
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-chilli-red/10 text-chilli-red">
                 <AlertCircle aria-hidden="true" size={14} />
               </span>
-              <span className="min-w-0 flex-1 text-sm text-forest-green">
+              <span className="min-w-0 flex-1 text-sm text-ink">
                 {ingredient.name}
               </span>
-              <span className="shrink-0 text-sm font-semibold text-forest-green">
+              <span className="shrink-0 text-sm font-semibold text-ink">
                 {formatQuantity(ingredient.quantity, ingredient.unit)}
               </span>
             </li>

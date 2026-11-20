@@ -73,10 +73,11 @@ export function IngredientQuantitiesScreen() {
       <ScreenHeader onBack={goBack} />
 
       <section className="mt-3">
-        <h1 className="text-[1.75rem] font-bold" id="quantities-title">
+        <p className="eyebrow-label">Fine-tune your ingredients</p>
+        <h1 className="mt-1 text-[1.7rem] font-extrabold" id="quantities-title">
           Enter Ingredient Quantities
         </h1>
-        <h2 className="mt-8 text-lg font-bold text-forest-green">
+        <h2 className="mt-8 text-lg font-bold text-ink">
           How much do you have?
         </h2>
         <p className="mt-1 text-sm text-muted">
@@ -88,7 +89,7 @@ export function IngredientQuantitiesScreen() {
             No ingredients were selected. Go back to choose ingredients first.
           </p>
         ) : (
-          <div className="mt-5 grid gap-3">
+          <div className="mt-5 grid gap-3 md:grid-cols-2 md:gap-5">
             {draftIngredients.map((ingredient) => (
               <IngredientQuantityCard
                 error={errors[ingredient.id]}
