@@ -1,0 +1,136 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-forest-green: #0b3d2e;
+  --color-fresh-green: #2e7d32;
+  --color-spice-orange: #ff8a00;
+  --color-warm-cream: #fff7e6;
+  --color-chilli-red: #d32f2f;
+  --color-ink: #292929;
+  --color-muted: #6b6b6b;
+  --color-progress-track: #b6b6b6;
+  --font-sans: 'Inter', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Inter', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  --text-display: clamp(2.5rem, 8vw, 4rem);
+  --text-heading-1: clamp(2rem, 6vw, 3rem);
+  --text-heading-2: clamp(1.5rem, 4vw, 2rem);
+  --text-heading-3: 1.25rem;
+  --spacing-page: clamp(1rem, 4vw, 2rem);
+  --spacing-section: clamp(2rem, 6vw, 4rem);
+  --radius-control: 0.75rem;
+  --radius-card: 1.25rem;
+  --radius-sheet: 1.5rem;
+  --shadow-card: 0 12px 32px rgb(11 61 46 / 8%);
+  --shadow-elevated: 0 20px 48px rgb(11 61 46 / 14%);
+}
+
+:root {
+  font-family: var(--font-sans);
+  color: var(--color-forest-green);
+  background: var(--color-warm-cream);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--color-forest-green);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+h1 {
+  font-size: var(--text-heading-1);
+}
+
+h2 {
+  font-size: var(--text-heading-2);
+}
+
+h3 {
+  font-size: var(--text-heading-3);
+}
+
+p {
+  line-height: 1.6;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-spice-orange);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * Dark mode is driven by the persisted Settings toggle. Theme tokens are
+ * reinterpreted here so existing screens keep their Tailwind class names.
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-forest-green: #d9f2e6;
+  --color-fresh-green: #81c784;
+  --color-warm-cream: #14291f;
+  --color-ink: #f4f7f5;
+  --color-muted: #a8bdb3;
+  --color-progress-track: #4f665c;
+  --shadow-card: 0 12px 32px rgb(0 0 0 / 35%);
+  --shadow-elevated: 0 20px 48px rgb(0 0 0 / 48%);
+}
+
+[data-theme='dark'] .bg-white,
+[data-theme='dark'] [class*='bg-white/'] {
+  background-color: #173228 !important;
+}
+
+[data-theme='dark'] .bg-\[\#FAFAFA\] {
+  background-color: #10261e !important;
+}
+
+[data-theme='dark'] .toggle-knob {
+  background-color: #ffffff !important;
+}
