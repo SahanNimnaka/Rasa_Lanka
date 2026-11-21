@@ -1,0 +1,24 @@
+{
+  "schema_version": "pilot-annotation-v1",
+  "annotation_id": "ANN-000037",
+  "image_id": "PIL-000017",
+  "record_role": "independent",
+  "annotator_id": "ANNTR-002",
+  "annotation_pass": "no_label",
+  "annotation_timestamp": "1970-01-01T00:00:00Z",
+  "ingredient_labels": [],
+  "uncertain_labels": [],
+  "out_of_scope_labels": [],
+  "unknown_ingredient_present": false,
+  "processing_state_evidence": [],
+  "visibility_flags": {
+    "partial_visibility_present": false,
+    "overlap_present": false,
+    "multi_ingredient_scene": false,
+    "package_label_used": false
+  },
+  "adjudication": {
+    "status": "not_adjudicated"
+  },
+  "notes": "PENDING template only. No human annotation recorded. Schema-required booleans are neutral defaults, not annotator decisions. Replace the sentinel timestamp with the actual completion time and set every field from direct visual evidence."
+}

@@ -1,0 +1,21 @@
+annotation_image_id,annotation_id,source_image_filename,local_relative_path,coordinator_only_warning
+PIL-000001,ANN-000001,r0_0.jpg,fruits360/brinjal/r0_0.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000002,ANN-000002,r0_100.jpg,fruits360/brinjal/r0_100.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000003,ANN-000003,r0_0.jpg,fruits360/ginger_root/r0_0.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000004,ANN-000004,r1_100.jpg,fruits360/ginger_root/r1_100.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000005,ANN-000005,r0_0.jpg,fruits360/onion/r0_0.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000006,ANN-000006,r2_100.jpg,fruits360/onion/r2_100.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000007,ANN-000007,r0_0.jpg,fruits360/red_onion/r0_0.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000008,ANN-000008,r2_100.jpg,fruits360/red_onion/r2_100.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000009,ANN-000009,r0_0.jpg,fruits360/tomato/r0_0.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000010,ANN-000010,r2_100.jpg,fruits360/tomato/r2_100.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000011,ANN-000011,100_Cardamom_pods.jpg,wikimedia_commons/cardamom_pod/100_Cardamom_pods.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000012,ANN-000012,Tellicherry_Black_Peppercorns.jpg,wikimedia_commons/black_pepper_whole/Tellicherry_Black_Peppercorns.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000013,ANN-000013,Whole_Coriander.jpg,wikimedia_commons/coriander_seed/Whole_Coriander.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000014,ANN-000014,Dried_cumin_seeds.jpg,wikimedia_commons/cumin_seed/Dried_cumin_seeds.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000015,ANN-000015,Curry_plant_%28curry_leaves%29.jpg,wikimedia_commons/curry_leaves/Curry_plant_%28curry_leaves%29.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000016,ANN-000016,Tamarind_fruit_pulp.JPG,wikimedia_commons/tamarind_pulp/Tamarind_fruit_pulp.JPG,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000017,ANN-000017,Byadgi_Chilli.jpg,wikimedia_commons/dried_red_chilli/Byadgi_Chilli.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000018,ANN-000018,Green_chilli_2.jpg,wikimedia_commons/green_chilli/Green_chilli_2.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000019,ANN-000019,Jackfruit_seeds.jpg,wikimedia_commons/jackfruit_seed/Jackfruit_seeds.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
+PIL-000020,ANN-000020,Jak_fruit-Sri_Lanka_%286%29.jpg,wikimedia_commons/mature_jackfruit/Jak_fruit-Sri_Lanka_%286%29.jpg,Do not expose paths/filenames to annotators; use a neutral viewer ordered by annotation_image_id.
