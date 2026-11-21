@@ -2,8 +2,13 @@ import { Card } from '../ui/Card'
 import type { RecipeStep } from '../../types/recipe'
 import { cn } from '../../utils/cn'
 
+export type CookingStepCardStep = Pick<
+  RecipeStep,
+  'id' | 'number' | 'title' | 'description'
+>
+
 export interface CookingStepCardProps {
-  step: RecipeStep
+  step: CookingStepCardStep
   isCurrent: boolean
   onNext?: () => void
 }

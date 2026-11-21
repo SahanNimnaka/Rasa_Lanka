@@ -1,23 +1,23 @@
 import { useState } from 'react'
-import { Lightbulb, Play } from 'lucide-react'
+import { Play } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { CookingRecipeStateCard } from '../../components/cooking/CookingRecipeStateCard'
 import { MobileScreen } from '../../components/layout/MobileScreen'
 import { ScreenHeader } from '../../components/layout/ScreenHeader'
-import { useCookingFlow } from '../../context/cookingFlowStore'
+import { Button } from '../../components/ui/Button'
+import { Card } from '../../components/ui/Card'
+import { LoadingIndicator } from '../../components/ui/LoadingIndicator'
+import { useRecipe } from '../../hooks/queries'
+import { useCookingRecipeId } from '../../hooks/useCookingRecipeId'
 import { useNavigateBack } from '../../hooks/useNavigateBack'
-import {
-  getDefaultRecipe,
-  getRecipeById,
-} from '../../services/mockRecipeService'
 import type { RecipeTab } from '../../types/recipe'
+import {
+  displayValue,
+  methodSummaryParts,
+  minuteLabel,
+  numberedCookingSteps,
+} from '../../utils/cookingRecipe'
 import { cn } from '../../utils/cn'
-
-const COOKING_TIPS = [
-  'Rinse lentils until the water runs clear.',
-  'Keep the heat low after adding coconut milk.',
-  'Stir occasionally to prevent sticking.',
-  'Adjust salt and spice to your preference.',
-] as const
 
 const TABS: Array<{ id: RecipeTab; label: string }> = [
   { id: 'ingredients', label: 'Ingredients' },
@@ -25,15 +25,95 @@ const TABS: Array<{ id: RecipeTab; label: string }> = [
   { id: 'video', label: 'Video' },
 ]
 
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="font-bold text-ink">{label}</dt>
+      <dd className="mt-0.5 text-muted">{value}</dd>
+    </div>
+  )
+}
+
 export function CookingGuidanceScreen() {
   const navigate = useNavigate()
   const { recipeId } = useParams()
-  const flow = useCookingFlow()
-  const goBack = useNavigateBack(`/cooking/${recipeId ?? 'dhal-curry'}`)
+  const { canonicalId, hasValidId, numericId } = useCookingRecipeId(recipeId)
+  const goBack = useNavigateBack(
+    canonicalId ? `/cooking/${canonicalId}` : '/recipes/recommendations',
+  )
+  const recipeQuery = useRecipe(numericId)
+  const retry = () => void recipeQuery.refetch()
 
-  const recipe =
-    getRecipeById(recipeId ?? flow.selectedRecipeId ?? '') ?? getDefaultRecipe()
   const [activeTab, setActiveTab] = useState<RecipeTab>('video')
+
+  if (!hasValidId) {
+    return (
+      <CookingRecipeStateCard
+        message="This cooking link does not contain a valid numeric recipe ID."
+        onBack={goBack}
+        title="Invalid recipe ID."
+      />
+    )
+  }
+
+  if (recipeQuery.isPending) {
+    return (
+      <CookingRecipeStateCard
+        action={
+          <div className="mt-5">
+            <LoadingIndicator label="Loading cooking guidance..." />
+          </div>
+        }
+        message="Fetching the recipe from the Laravel API."
+        onBack={goBack}
+        title="Loading cooking guidance..."
+      />
+    )
+  }
+
+  if (recipeQuery.isError) {
+    const isNotFound =
+      recipeQuery.error.status === 404 || recipeQuery.error.code === 'NOT_FOUND'
+
+    return (
+      <CookingRecipeStateCard
+        action={
+          isNotFound ? undefined : (
+            <Button className="mt-4" onClick={retry} size="sm">
+              Try again
+            </Button>
+          )
+        }
+        message={
+          recipeQuery.error.message ||
+          (isNotFound
+            ? 'The requested recipe does not exist.'
+            : 'The recipe service is temporarily unavailable.')
+        }
+        onBack={goBack}
+        title={isNotFound ? 'Recipe not found.' : 'Guidance could not be loaded.'}
+      />
+    )
+  }
+
+  const recipe = recipeQuery.data
+  if (!recipe) {
+    return (
+      <CookingRecipeStateCard
+        action={
+          <Button className="mt-4" onClick={retry} size="sm">
+            Try again
+          </Button>
+        }
+        message="The recipe service returned no recipe data."
+        onBack={goBack}
+        title="Guidance could not be loaded."
+      />
+    )
+  }
+
+  const instructionCount = numberedCookingSteps(recipe.instructions).length
+  const summaryParts = methodSummaryParts(recipe.methodSummary)
 
   function handleTabChange(tab: RecipeTab) {
     if (tab === 'video') {
@@ -57,6 +137,32 @@ export function CookingGuidanceScreen() {
       <h2 className="mt-1 text-base font-bold text-fresh-green">
         Cooking Guidance
       </h2>
+
+      <Card className="mt-5 rounded-2xl p-4" id="guidance-overview">
+        <h2
+          className="section-title text-sm font-extrabold"
+          id="guidance-overview-title"
+        >
+          Recipe overview
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-muted">
+          {displayValue(recipe.description) ?? 'No description is provided.'}
+        </p>
+        <dl className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+          <Fact
+            label="Preparation"
+            value={minuteLabel(recipe.preparationTimeMinutes)}
+          />
+          <Fact label="Cooking" value={minuteLabel(recipe.cookingTimeMinutes)} />
+          <Fact label="Total" value={minuteLabel(recipe.totalTimeMinutes)} />
+          <Fact
+            label="Instructions"
+            value={`${instructionCount} numbered ${
+              instructionCount === 1 ? 'instruction' : 'instructions'
+            }`}
+          />
+        </dl>
+      </Card>
 
       <div
         aria-label="Recipe sections"
@@ -113,7 +219,7 @@ export function CookingGuidanceScreen() {
             </span>
           </div>
           <p className="relative mt-4 text-xs font-bold tracking-wide text-ink">
-            Video player
+            Video unavailable
           </p>
           <h3 className="sr-only">Video unavailable</h3>
           <p className="sr-only">
@@ -123,39 +229,37 @@ export function CookingGuidanceScreen() {
         </div>
 
         <div
-          aria-label="Static video timeline preview: 01:20 of 08:30"
+          aria-label="No video timeline is available for this recipe"
           className="glass-panel mt-4 rounded-2xl px-4 py-3"
           role="img"
         >
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-forest-green/10">
-            <div className="progress-fill h-full w-[16%] rounded-full" />
-          </div>
-          <div className="mt-2 flex justify-between text-[11px] font-bold text-muted">
-            <span>01:20</span>
-            <span>08:30</span>
-          </div>
+          <div className="h-1.5 w-full rounded-full bg-forest-green/10" />
+          <p className="mt-2 text-center text-[11px] font-bold text-muted">
+            No video timeline is available.
+          </p>
         </div>
 
-        <section aria-labelledby="cooking-tips-title" className="mt-8">
+        <section aria-labelledby="guidance-method-title" className="mt-8">
           <h3
             className="section-title text-base font-extrabold"
-            id="cooking-tips-title"
+            id="guidance-method-title"
           >
-            Cooking Tips
+            Cooking method summary
           </h3>
-          <ul className="mt-4 grid gap-3 md:grid-cols-2 md:gap-5">
-            {COOKING_TIPS.map((tip) => (
-              <li
-                className="glass-panel flex items-start gap-3 rounded-2xl p-3"
-                key={tip}
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-spice-orange/15 text-spice-orange">
-                  <Lightbulb aria-hidden="true" size={15} />
-                </span>
-                <p className="text-sm leading-6 text-muted">{tip}</p>
-              </li>
-            ))}
-          </ul>
+          {summaryParts.length > 0 ? (
+            <Card className="mt-4 grid gap-3 rounded-2xl p-4 md:grid-cols-2 md:gap-5">
+              {summaryParts.map((part) => (
+                <p className="text-sm leading-6 text-muted" key={part.label}>
+                  <span className="font-bold text-ink">{part.label}:</span>{' '}
+                  {part.value}
+                </p>
+              ))}
+            </Card>
+          ) : (
+            <p className="mt-2 text-sm text-muted">
+              No cooking method summary is provided.
+            </p>
+          )}
         </section>
       </div>
     </MobileScreen>

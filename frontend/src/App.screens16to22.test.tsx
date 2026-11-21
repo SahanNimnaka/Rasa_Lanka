@@ -3,6 +3,9 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { AppRoutes } from './App'
+import { mockApiAdapter } from './test/apiMock'
+import { itemEnvelope, recipeDetailDto } from './test/queryFixtures'
+import { makeAxiosResponse, setApiAdapter } from './test/queryTestUtils'
 
 function renderRoutes(initialEntry: string) {
   return render(
@@ -18,10 +21,16 @@ describe('Screens 16–23 routes', () => {
     localStorage.clear()
     delete document.documentElement.dataset.theme
     document.documentElement.classList.remove('theme-dark')
+    setApiAdapter(async (config) => {
+      if (config.url === '/recipes/11') {
+        return makeAxiosResponse(config, itemEnvelope(recipeDetailDto))
+      }
+      return mockApiAdapter(config)
+    })
   })
 
   it.each([
-    ['/cooking/dhal-curry/guidance', 'Cooking Guidance'],
+    ['/cooking/11/guidance', 'Cooking Guidance'],
     ['/saved', 'Saved Recipes'],
     ['/search', 'Search and Filters'],
     ['/history', 'History'],

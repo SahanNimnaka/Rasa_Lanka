@@ -52,13 +52,20 @@ API values without mutating query data. Images, ratings, match percentages,
 availability, and nutrition are not invented; the existing image and video
 placeholders remain.
 
-The cooking screens are intentionally unchanged: `CookingGuidanceScreen` and
-`CookingInstructionsScreen` still read the mock catalogue through
-`getRecipeById`/`getDefaultRecipe`, and `CookingInstructionsScreen` still uses
-`applyUserQuantities` for locally entered values. Saved Recipes, History,
-recognition, and quantity-entry workflows also remain mock/local. Because
-History still depends on the mock catalogue, opening an API-backed recipe
-detail does not add a History entry yet.
+`CookingGuidanceScreen` and `CookingInstructionsScreen` also load the selected
+recipe through `useRecipe(id)` and never fall back to the mock catalogue. The
+guidance screen shows the API name, description, preparation/cooking/total
+times, method summary, and numbered instruction count. The instructions screen
+uses the API method summary separately and renders numbered `recipe_instructions`
+in their original order, excluding step 0. Both screens validate the numeric
+route ID and handle invalid, loading, error/retry, and not-found states. The
+shared cooking flow preserves the selected recipe ID and a valid step index;
+changing recipes resets progress, while refetching does not. Locally entered
+quantities are still shown alongside API values without mutating query data.
+Video placeholders remain placeholders, and no media URLs or steps are
+invented. Saved Recipes, History, recognition, and quantity-entry workflows
+remain mock/local. Because History still depends on the mock catalogue, opening
+an API-backed recipe does not add a History entry yet.
 
 ## Theme
 
