@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
   MemoryRouter,
@@ -9,18 +9,23 @@ import {
   useParams,
 } from 'react-router-dom'
 import { CookingFlowProvider } from '../../context/CookingFlowContext'
-import { COOKING_FLOW_STORAGE_KEY } from '../../context/cookingFlowStore'
+import {
+  COOKING_FLOW_STORAGE_KEY,
+  useCookingFlow,
+} from '../../context/cookingFlowStore'
 import {
   itemEnvelope,
   ingredientDto,
   recipeDetailDto,
 } from '../../test/queryFixtures'
 import {
+  createTestQueryClient,
   createQueryWrapper,
   makeAxiosError,
   makeAxiosResponse,
   setApiAdapter,
 } from '../../test/queryTestUtils'
+import { queryKeys } from '../../services/queries/queryKeys'
 import type {
   DataQualityIssueDto,
   RecipeDetailDto,
@@ -61,12 +66,36 @@ function CookingDestination() {
   )
 }
 
-function renderScreen(initialEntry = DETAIL_URL) {
-  const wrapper = createQueryWrapper()
+function FlowControls() {
+  const flow = useCookingFlow()
 
-  return render(
+  return (
+    <div>
+      <button onClick={() => flow.setServings(6)} type="button">
+        Change servings
+      </button>
+      <button
+        onClick={() =>
+          flow.updateIngredientQuantity('demo-red-lentils', {
+            quantity: '333',
+          })
+        }
+        type="button"
+      >
+        Change local quantity
+      </button>
+    </div>
+  )
+}
+
+function renderScreen(initialEntry = DETAIL_URL, withFlowControls = false) {
+  const queryClient = createTestQueryClient()
+  const wrapper = createQueryWrapper(queryClient)
+
+  const result = render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <CookingFlowProvider>
+        {withFlowControls && <FlowControls />}
         <Routes>
           <Route element={<RecipeDetailsScreen />} path="/recipes/:recipeId" />
           <Route element={<CookingDestination />} path="/cooking/:recipeId" />
@@ -79,6 +108,8 @@ function renderScreen(initialEntry = DETAIL_URL) {
     </MemoryRouter>,
     { wrapper },
   )
+
+  return { ...result, queryClient }
 }
 
 function seedFlow() {
@@ -477,6 +508,50 @@ describe('RecipeDetailsScreen', () => {
     expect(screen.getByText('Your quantity:')).toBeInTheDocument()
     expect(screen.getByText('250 g')).toBeInTheDocument()
     expect(screen.getByText('200 g')).toBeInTheDocument()
+  })
+
+  it('keeps serving and local quantity choices when recipe data refetches', async () => {
+    let requestCount = 0
+    setApiAdapter(async (config) => {
+      if (config.url === DETAIL_URL) {
+        requestCount += 1
+        return makeAxiosResponse(
+          config,
+          itemEnvelope(
+            detail({
+              name: requestCount === 1 ? 'Initial Recipe' : 'Refetched Recipe',
+            }),
+          ),
+        )
+      }
+      throw new Error(`Unexpected request: ${config.url}`)
+    })
+    const user = userEvent.setup()
+    const { queryClient } = renderScreen(DETAIL_URL, true)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Initial Recipe' }),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Change servings' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Change local quantity' }),
+    )
+
+    expect(screen.getByText('6 servings')).toBeInTheDocument()
+    expect(screen.getByText('333 g')).toBeInTheDocument()
+
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.recipes.detail(DETAIL_ID),
+      })
+    })
+
+    expect(
+      await screen.findByRole('heading', { name: 'Refetched Recipe' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('6 servings')).toBeInTheDocument()
+    expect(screen.getByText('333 g')).toBeInTheDocument()
+    expect(requestCount).toBe(2)
   })
 
   it('navigates to cooking with the backend ID and saved servings', async () => {
