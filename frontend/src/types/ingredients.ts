@@ -1,10 +1,14 @@
-export type IngredientSource = 'demo' | 'manual'
+export type IngredientSource = 'demo' | 'catalogue' | 'manual'
 
 export interface SelectedIngredient {
   id: string
   name: string
   confidence?: number
   source: IngredientSource
+  /** Set when a demo detection has been corrected to a catalogue ingredient. */
+  mappedFromDemoId?: string
+  preparation?: string | null
+  isRequired?: boolean | null
 }
 
 export const MEASUREMENT_UNITS = [
@@ -24,7 +28,7 @@ export type MeasurementUnit = (typeof MEASUREMENT_UNITS)[number]
 
 export interface IngredientQuantity {
   quantity: string
-  unit: MeasurementUnit
+  unit: string
 }
 
 export interface IngredientWithQuantity

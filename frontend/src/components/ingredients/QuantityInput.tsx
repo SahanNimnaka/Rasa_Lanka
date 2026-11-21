@@ -1,17 +1,14 @@
 import { useId } from 'react'
-import {
-  MEASUREMENT_UNITS,
-  type MeasurementUnit,
-} from '../../types/ingredients'
+import { MEASUREMENT_UNITS } from '../../types/ingredients'
 import { cn } from '../../utils/cn'
 
 export interface QuantityInputProps {
   label: string
   value: string
-  unit: MeasurementUnit
+  unit: string
   error?: string
   onValueChange: (value: string) => void
-  onUnitChange: (unit: MeasurementUnit) => void
+  onUnitChange: (unit: string) => void
 }
 
 export function QuantityInput({
@@ -25,6 +22,7 @@ export function QuantityInput({
   const generatedId = useId()
   const inputId = `${generatedId}-quantity`
   const errorId = `${generatedId}-error`
+  const unitListId = `${generatedId}-units`
 
   return (
     <div className="grid min-w-0 grid-cols-1 gap-2">
@@ -47,20 +45,19 @@ export function QuantityInput({
           type="text"
           value={value}
         />
-        <select
+        <input
           aria-label={`Unit for ${label}`}
           className="w-[86px] shrink-0 rounded-control border border-forest-green/20 bg-white px-2 py-2 text-sm text-ink focus:border-fresh-green focus:outline-none focus:ring-2 focus:ring-fresh-green/25"
-          onChange={(event) =>
-            onUnitChange(event.target.value as MeasurementUnit)
-          }
+          list={unitListId}
+          onChange={(event) => onUnitChange(event.target.value)}
+          type="text"
           value={unit}
-        >
+        />
+        <datalist id={unitListId}>
           {MEASUREMENT_UNITS.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
+            <option key={option} value={option} />
           ))}
-        </select>
+        </datalist>
       </div>
       {error && (
         <p

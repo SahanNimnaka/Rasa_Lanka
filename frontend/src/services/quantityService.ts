@@ -5,10 +5,7 @@ import {
   type SelectedIngredient,
 } from '../types/ingredients'
 
-const DEFAULT_QUANTITIES: Record<
-  string,
-  { quantity: string; unit: MeasurementUnit }
-> = {
+const DEFAULT_QUANTITIES: Record<string, { quantity: string; unit: string }> = {
   'red lentils': { quantity: '200', unit: 'g' },
   'coconut milk': { quantity: '1', unit: 'cup' },
   onion: { quantity: '1', unit: 'piece' },
@@ -20,9 +17,18 @@ export function isMeasurementUnit(value: unknown): value is MeasurementUnit {
   return MEASUREMENT_UNITS.includes(value as MeasurementUnit)
 }
 
+export function normalizeUnit(value: unknown): string {
+  if (typeof value !== 'string') {
+    return 'piece'
+  }
+
+  const trimmed = value.trim()
+  return trimmed || 'piece'
+}
+
 export function getDefaultQuantity(name: string): {
   quantity: string
-  unit: MeasurementUnit
+  unit: string
 } {
   return (
     DEFAULT_QUANTITIES[name.trim().toLowerCase()] ?? {
@@ -39,7 +45,7 @@ export function withDefaultQuantity(
     return {
       ...ingredient,
       quantity: String(ingredient.quantity),
-      unit: isMeasurementUnit(ingredient.unit) ? ingredient.unit : 'piece',
+      unit: normalizeUnit(ingredient.unit),
     }
   }
 

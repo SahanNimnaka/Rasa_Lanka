@@ -11,10 +11,10 @@ import type {
 import { IngredientQuantitiesScreen } from './IngredientQuantitiesScreen'
 
 const selectedIngredients: SelectedIngredient[] = [
-  { id: 'demo-red-lentils', name: 'Red lentils', source: 'demo' },
-  { id: 'demo-coconut-milk', name: 'Coconut milk', source: 'demo' },
-  { id: 'demo-onion', name: 'Onion', source: 'demo' },
-  { id: 'manual-turmeric', name: 'Turmeric', source: 'manual' },
+  { id: '81', name: 'Red lentils', source: 'catalogue' },
+  { id: '82', name: 'Coconut milk', source: 'catalogue' },
+  { id: '83', name: 'Onion', source: 'catalogue' },
+  { id: '84', name: 'Turmeric', source: 'catalogue' },
 ]
 
 function ReceivedQuantities() {
@@ -23,24 +23,34 @@ function ReceivedQuantities() {
     (location.state as IngredientQuantitiesState | null)?.ingredients ?? []
 
   return (
-    <div data-testid="received-quantities">
-      {ingredients
-        .map((ingredient) => {
-          const withQuantity = ingredient as IngredientWithQuantity
-          return `${withQuantity.name} ${withQuantity.quantity} ${withQuantity.unit}`
-        })
-        .join(' | ')}
-    </div>
+    <>
+      <div data-testid="received-quantities">
+        {ingredients
+          .map((ingredient) => {
+            const withQuantity = ingredient as IngredientWithQuantity
+            return `${withQuantity.name} ${withQuantity.quantity} ${withQuantity.unit}`
+          })
+          .join(' | ')}
+      </div>
+      <div data-testid="received-metadata">
+        {ingredients
+          .map((ingredient) => {
+            const withQuantity = ingredient as IngredientWithQuantity
+            return `${withQuantity.id}:${withQuantity.preparation ?? '-'}:${withQuantity.isRequired ?? '-'}`
+          })
+          .join(' | ')}
+      </div>
+    </>
   )
 }
 
-function renderScreen() {
+function renderScreen(ingredients: SelectedIngredient[] = selectedIngredients) {
   render(
     <MemoryRouter
       initialEntries={[
         {
           pathname: '/ingredients/quantities',
-          state: { ingredients: selectedIngredients },
+          state: { ingredients },
         },
       ]}
     >
@@ -65,7 +75,7 @@ describe('IngredientQuantitiesScreen', () => {
     sessionStorage.clear()
   })
 
-  it('uses data-driven default quantities and supports any selected ingredient', () => {
+  it('uses data-driven default quantities and supports any catalogue ingredient', () => {
     renderScreen()
 
     expect(
@@ -78,30 +88,78 @@ describe('IngredientQuantitiesScreen', () => {
     expect(screen.getByLabelText('Quantity for Onion')).toHaveValue('1')
     expect(screen.getByLabelText('Unit for Onion')).toHaveValue('piece')
 
-    // Manually added ingredients are handled by the same reusable card.
+    // A manually added catalogue ingredient uses the same reusable card.
     expect(screen.getByLabelText('Quantity for Turmeric')).toHaveValue('0.5')
     expect(screen.getByLabelText('Unit for Turmeric')).toHaveValue('tsp')
+    expect(screen.getByText('Catalogue ingredient #81')).toBeInTheDocument()
+    expect(screen.getByText('Catalogue ingredient #84')).toBeInTheDocument()
   })
 
-  it('edits quantities and units, then passes them to the next screen', async () => {
+  it('edits quantities and free-text units, then passes them to the next screen', async () => {
     const user = userEvent.setup()
     renderScreen()
 
     const quantity = screen.getByLabelText('Quantity for Red lentils')
     await user.clear(quantity)
     await user.type(quantity, '250')
-    await user.selectOptions(
-      screen.getByLabelText('Unit for Red lentils'),
-      'kg',
-    )
+    const unit = screen.getByLabelText('Unit for Red lentils')
+    await user.clear(unit)
+    await user.type(unit, 'kg')
 
     expect(quantity).toHaveValue('250')
-    expect(screen.getByLabelText('Unit for Red lentils')).toHaveValue('kg')
+    expect(unit).toHaveValue('kg')
 
     await user.click(screen.getByRole('button', { name: 'Next' }))
 
     expect(screen.getByTestId('received-quantities')).toHaveTextContent(
       'Red lentils 250 kg',
+    )
+  })
+
+  it('accepts a custom free-text unit such as handful', async () => {
+    const user = userEvent.setup()
+    renderScreen()
+
+    const quantity = screen.getByLabelText('Quantity for Red lentils')
+    await user.clear(quantity)
+    await user.type(quantity, '3')
+    const unit = screen.getByLabelText('Unit for Red lentils')
+    await user.clear(unit)
+    await user.type(unit, 'handful')
+
+    expect(unit).toHaveValue('handful')
+
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+
+    expect(screen.getByTestId('received-quantities')).toHaveTextContent(
+      'Red lentils 3 handful',
+    )
+  })
+
+  it('preserves preparation and optional metadata in the route state', async () => {
+    const user = userEvent.setup()
+    renderScreen([
+      {
+        id: '85',
+        name: 'Chilli flakes',
+        source: 'catalogue',
+        preparation: 'crushed finely',
+        isRequired: false,
+      },
+    ])
+
+    expect(screen.getByText('Catalogue ingredient #85')).toBeInTheDocument()
+    expect(screen.getByText('Preparation: crushed finely')).toBeInTheDocument()
+    expect(screen.getByText('Optional')).toBeInTheDocument()
+    expect(screen.queryByText('Required')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+
+    expect(screen.getByTestId('received-quantities')).toHaveTextContent(
+      'Chilli flakes 1 piece',
+    )
+    expect(screen.getByTestId('received-metadata')).toHaveTextContent(
+      '85:crushed finely:false',
     )
   })
 

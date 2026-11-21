@@ -1,8 +1,5 @@
 import { ImageIcon } from 'lucide-react'
-import type {
-  IngredientWithQuantity,
-  MeasurementUnit,
-} from '../../types/ingredients'
+import type { IngredientWithQuantity } from '../../types/ingredients'
 import { Card } from '../ui/Card'
 import { QuantityInput } from './QuantityInput'
 
@@ -10,7 +7,7 @@ export interface IngredientQuantityCardProps {
   ingredient: IngredientWithQuantity
   error?: string
   onQuantityChange: (value: string) => void
-  onUnitChange: (unit: MeasurementUnit) => void
+  onUnitChange: (unit: string) => void
 }
 
 export function IngredientQuantityCard({
@@ -40,7 +37,22 @@ export function IngredientQuantityCard({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-bold text-ink">{ingredient.name}</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-bold text-ink">{ingredient.name}</h3>
+          {typeof ingredient.isRequired === 'boolean' && (
+            <span className="rounded-full bg-forest-green/10 px-2 py-0.5 text-[10px] font-bold text-ink">
+              {ingredient.isRequired ? 'Required' : 'Optional'}
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-[11px] text-muted">
+          Catalogue ingredient #{ingredient.id}
+        </p>
+        {ingredient.preparation && (
+          <p className="mt-1 text-xs text-muted">
+            Preparation: {ingredient.preparation}
+          </p>
+        )}
         <div className="mt-2">
           <QuantityInput
             error={error}

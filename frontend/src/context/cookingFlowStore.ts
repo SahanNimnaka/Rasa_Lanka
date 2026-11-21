@@ -1,13 +1,17 @@
 import { createContext, use } from 'react'
+import { normalizeUnit } from '../services/quantityService'
+import { parseApiId } from '../services/queries/queryKeys'
 import {
-  isMeasurementUnit,
-  withDefaultQuantity,
-} from '../services/quantityService'
+  clampServings,
+  DEFAULT_SERVINGS,
+} from '../services/servingService'
 import type {
   IngredientQuantity,
   IngredientWithQuantity,
   SelectedIngredient,
 } from '../types/ingredients'
+
+export { clampServings } from '../services/servingService'
 
 export const COOKING_FLOW_STORAGE_KEY = 'rasalanka.cooking-flow.v1'
 
@@ -37,7 +41,7 @@ export type CookingFlowContextValue = CookingFlowState & CookingFlowActions
 
 export const DEFAULT_COOKING_FLOW_STATE: CookingFlowState = {
   ingredients: [],
-  servings: 2,
+  servings: DEFAULT_SERVINGS,
   favoriteRecipeIds: [],
   stepIndex: 0,
 }
@@ -46,28 +50,58 @@ export const CookingFlowContext = createContext<CookingFlowContextValue | null>(
   null,
 )
 
-function isSelectedIngredient(value: unknown): value is SelectedIngredient {
-  if (typeof value !== 'object' || value === null) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isIngredientWithQuantity(value: unknown): value is IngredientWithQuantity {
+  if (!isRecord(value)) {
     return false
   }
-  const candidate = value as Partial<SelectedIngredient>
+
   return (
-    typeof candidate.id === 'string' &&
-    typeof candidate.name === 'string' &&
-    (candidate.source === 'demo' || candidate.source === 'manual')
+    typeof value.id === 'string' &&
+    parseApiId(value.id) !== null &&
+    typeof value.name === 'string' &&
+    value.name.trim().length > 0 &&
+    (value.source === 'demo' ||
+      value.source === 'manual' ||
+      value.source === 'catalogue') &&
+    typeof value.quantity === 'string' &&
+    typeof value.unit === 'string'
   )
 }
 
-function isIngredientWithQuantity(
-  value: unknown,
-): value is IngredientWithQuantity {
-  if (!isSelectedIngredient(value)) {
-    return false
+function normalizeIngredient(
+  value: IngredientWithQuantity,
+): IngredientWithQuantity {
+  const numericId = parseApiId(value.id)
+  if (numericId === null) {
+    throw new Error('Expected a numeric catalogue ingredient ID')
   }
-  const candidate = value as Partial<IngredientWithQuantity>
-  return (
-    typeof candidate.quantity === 'string' && isMeasurementUnit(candidate.unit)
-  )
+
+  return {
+    ...value,
+    id: String(numericId),
+    name: value.name.trim(),
+    // Persisted selections must refer to real catalogue entries. Demo IDs and
+    // legacy generated IDs are discarded when the flow is loaded.
+    source: 'catalogue',
+    unit: normalizeUnit(value.unit),
+  }
+}
+
+function dedupeIngredients(
+  ingredients: IngredientWithQuantity[],
+): IngredientWithQuantity[] {
+  const seen = new Set<string>()
+  return ingredients.filter((ingredient) => {
+    if (seen.has(ingredient.id)) {
+      return false
+    }
+    seen.add(ingredient.id)
+    return true
+  })
 }
 
 export function loadCookingFlowState(): CookingFlowState {
@@ -82,17 +116,19 @@ export function loadCookingFlowState(): CookingFlowState {
     }
     const parsed = JSON.parse(raw) as Partial<CookingFlowState>
 
-    return {
-      ingredients: Array.isArray(parsed.ingredients)
-        ? parsed.ingredients
+    const ingredients = Array.isArray(parsed.ingredients)
+      ? dedupeIngredients(
+          parsed.ingredients
             .filter(isIngredientWithQuantity)
-            .map(withDefaultQuantity)
-        : [],
+            .map(normalizeIngredient),
+        )
+      : []
+
+    return {
+      ingredients,
       servings:
-        typeof parsed.servings === 'number' &&
-        Number.isFinite(parsed.servings) &&
-        parsed.servings >= 1
-          ? Math.floor(parsed.servings)
+        typeof parsed.servings === 'number'
+          ? clampServings(parsed.servings)
           : DEFAULT_COOKING_FLOW_STATE.servings,
       selectedRecipeId:
         typeof parsed.selectedRecipeId === 'string'
@@ -113,13 +149,6 @@ export function loadCookingFlowState(): CookingFlowState {
   } catch {
     return DEFAULT_COOKING_FLOW_STATE
   }
-}
-
-export function clampServings(servings: number): number {
-  if (!Number.isFinite(servings)) {
-    return DEFAULT_COOKING_FLOW_STATE.servings
-  }
-  return Math.max(1, Math.min(20, Math.floor(servings)))
 }
 
 export function useCookingFlow(): CookingFlowContextValue {

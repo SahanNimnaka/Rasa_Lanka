@@ -5,12 +5,15 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { withDefaultQuantity } from '../services/quantityService'
 import {
-  MEASUREMENT_UNITS,
-  type IngredientQuantity,
-  type IngredientWithQuantity,
-  type SelectedIngredient,
+  normalizeUnit,
+  withDefaultQuantity,
+} from '../services/quantityService'
+import { parseApiId } from '../services/queries/queryKeys'
+import type {
+  IngredientQuantity,
+  IngredientWithQuantity,
+  SelectedIngredient,
 } from '../types/ingredients'
 import {
   clampServings,
@@ -20,6 +23,37 @@ import {
   type CookingFlowContextValue,
   type CookingFlowState,
 } from './cookingFlowStore'
+
+function normalizeIngredients(
+  ingredients: Array<SelectedIngredient | IngredientWithQuantity>,
+): IngredientWithQuantity[] {
+  const seen = new Set<string>()
+  const normalized: IngredientWithQuantity[] = []
+
+  for (const ingredient of ingredients) {
+    const numericId = parseApiId(ingredient.id)
+    if (numericId === null) {
+      continue
+    }
+
+    const id = String(numericId)
+    if (seen.has(id)) {
+      continue
+    }
+    seen.add(id)
+
+    normalized.push(
+      withDefaultQuantity({
+        ...ingredient,
+        id,
+        // Only real catalogue entries may be persisted in the cooking flow.
+        source: 'catalogue',
+      }),
+    )
+  }
+
+  return normalized
+}
 
 export function CookingFlowProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CookingFlowState>(loadCookingFlowState)
@@ -40,7 +74,7 @@ export function CookingFlowProvider({ children }: { children: ReactNode }) {
     (ingredients: Array<SelectedIngredient | IngredientWithQuantity>) => {
       setState((current) => ({
         ...current,
-        ingredients: ingredients.map(withDefaultQuantity),
+        ingredients: normalizeIngredients(ingredients),
         stepIndex: 0,
       }))
     },
@@ -60,9 +94,9 @@ export function CookingFlowProvider({ children }: { children: ReactNode }) {
                     ? ingredient.quantity
                     : String(update.quantity),
                 unit:
-                  update.unit && MEASUREMENT_UNITS.includes(update.unit)
-                    ? update.unit
-                    : ingredient.unit,
+                  update.unit === undefined
+                    ? ingredient.unit
+                    : normalizeUnit(update.unit),
               }
             : ingredient,
         ),

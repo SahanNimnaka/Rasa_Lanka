@@ -76,7 +76,7 @@ function FlowControls() {
       </button>
       <button
         onClick={() =>
-          flow.updateIngredientQuantity('demo-red-lentils', {
+          flow.updateIngredientQuantity('81', {
             quantity: '333',
           })
         }
@@ -118,9 +118,9 @@ function seedFlow() {
     JSON.stringify({
       ingredients: [
         {
-          id: 'demo-red-lentils',
+          id: '81',
           name: 'Red lentils',
-          source: 'demo',
+          source: 'catalogue',
           quantity: '250',
           unit: 'g',
         },

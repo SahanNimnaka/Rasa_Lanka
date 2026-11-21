@@ -65,7 +65,7 @@ function apiDetail(
 function FlowProbe() {
   const flow = useCookingFlow()
   const ingredients = flow.ingredients
-    .map((item) => `${item.name}:${item.quantity} ${item.unit}`)
+    .map((item) => `${item.id}:${item.name}:${item.quantity} ${item.unit}`)
     .join(', ')
   return <div data-testid="flow-probe">{`${ingredients} | ${flow.servings}`}</div>
 }
@@ -100,16 +100,16 @@ function seedFlow() {
     JSON.stringify({
       ingredients: [
         {
-          id: 'demo-red-lentils',
+          id: '81',
           name: 'Red lentils',
-          source: 'demo',
+          source: 'catalogue',
           quantity: '200',
           unit: 'g',
         },
         {
-          id: 'demo-coconut',
+          id: '82',
           name: 'Coconut',
-          source: 'demo',
+          source: 'catalogue',
           quantity: '1',
           unit: 'cup',
         },
@@ -173,7 +173,7 @@ describe('RecipeRecommendationsScreen', () => {
       screen.getByText(/not AI-generated recommendations/),
     ).toBeInTheDocument()
     expect(screen.getByTestId('flow-probe')).toHaveTextContent(
-      'Red lentils:200 g, Coconut:1 cup | 4',
+      '81:Red lentils:200 g, 82:Coconut:1 cup | 4',
     )
   })
 

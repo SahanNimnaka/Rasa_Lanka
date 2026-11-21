@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Image as ImageIcon, Trash } from 'lucide-react'
 import type { SelectedIngredient } from '../../types/ingredients'
 import { Button } from '../ui/Button'
@@ -8,16 +9,31 @@ export interface IngredientRowProps {
   onToggle: (id: string, selected: boolean) => void
   onRemove?: (id: string) => void
   confidenceLabel?: string
+  sourceLabel?: string
+  footer?: ReactNode
+  action?: ReactNode
 }
 
 export function IngredientRow({
+  action,
   confidenceLabel = 'Image confidence',
+  footer,
   ingredient,
   onRemove,
   onToggle,
   selected,
+  sourceLabel,
 }: IngredientRowProps) {
-  const isManual = ingredient.source === 'manual'
+  const defaultSourceLabel =
+    ingredient.source === 'demo'
+      ? 'Demo detection — not a catalogue item'
+      : ingredient.source === 'catalogue'
+        ? 'Laravel catalogue ingredient'
+        : 'Manually added (legacy)'
+  const detail =
+    ingredient.source === 'demo' && ingredient.confidence !== undefined
+      ? `${confidenceLabel}: ${ingredient.confidence}%`
+      : (sourceLabel ?? defaultSourceLabel)
 
   return (
     <div className="glass-panel flex items-center gap-2 rounded-2xl p-2">
@@ -29,11 +45,8 @@ export function IngredientRow({
           <span className="block truncate text-sm font-semibold text-ink">
             {ingredient.name}
           </span>
-          <span className="block text-xs text-muted">
-            {isManual
-              ? 'Manually added'
-              : `${confidenceLabel}: ${ingredient.confidence ?? 0}%`}
-          </span>
+          <span className="block text-xs text-muted">{detail}</span>
+          {footer && <span className="mt-1 block text-xs text-muted">{footer}</span>}
         </span>
       </div>
 
@@ -44,6 +57,8 @@ export function IngredientRow({
         onChange={(event) => onToggle(ingredient.id, event.target.checked)}
         type="checkbox"
       />
+
+      {action}
 
       {onRemove && (
         <Button

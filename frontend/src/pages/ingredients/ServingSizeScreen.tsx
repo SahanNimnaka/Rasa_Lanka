@@ -5,7 +5,7 @@ import { MobileScreen } from '../../components/layout/MobileScreen'
 import { ScreenHeader } from '../../components/layout/ScreenHeader'
 import { Button } from '../../components/ui/Button'
 import { Card } from '../../components/ui/Card'
-import { useCookingFlow } from '../../context/cookingFlowStore'
+import { clampServings, useCookingFlow } from '../../context/cookingFlowStore'
 import { useNavigateBack } from '../../hooks/useNavigateBack'
 import { cn } from '../../utils/cn'
 
@@ -14,13 +14,6 @@ interface ServingSizeRouteState {
 }
 
 const QUICK_SERVINGS = [1, 2, 3, 4, 5, 6] as const
-
-function clampServings(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 2
-  }
-  return Math.max(1, Math.min(20, Math.floor(value)))
-}
 
 export function ServingSizeScreen() {
   const navigate = useNavigate()

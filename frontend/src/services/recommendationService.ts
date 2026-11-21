@@ -1,3 +1,4 @@
+import { clampServings } from './servingService'
 import type { RecipeSortOption } from '../types/recipe'
 
 export interface RecipeFilterOptions {
@@ -28,13 +29,6 @@ export const DEFAULT_SORT_OPTION: RecipeSortOption = 'best-match'
 export const DEFAULT_RECIPE_FILTERS: RecipeFilterOptions = {
   highMatchOnly: false,
   underThirtyMinutesOnly: false,
-}
-
-function clampServings(servings: number): number {
-  if (!Number.isFinite(servings)) {
-    return 2
-  }
-  return Math.max(1, Math.min(20, Math.floor(servings)))
 }
 
 function ratingOf(recipe: RecommendationCandidate): number {

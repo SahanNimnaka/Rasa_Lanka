@@ -1,5 +1,3 @@
-import type { MeasurementUnit } from './ingredients'
-
 export type RecipeTab = 'ingredients' | 'instructions' | 'video'
 
 export type RecipeSortOption = 'best-match' | 'rating' | 'prep-time' | 'name'
@@ -12,7 +10,7 @@ export interface RecipeIngredient {
   id: string
   name: string
   quantity: string
-  unit: MeasurementUnit
+  unit: string
   available: boolean
   image?: string
 }

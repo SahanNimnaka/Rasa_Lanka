@@ -72,9 +72,12 @@ export function RecipeRecommendationsScreen() {
   )
   const [showFilters, setShowFilters] = useState(false)
 
+  // IDs and quantities stay in the cooking flow for details/cooking screens.
+  // The existing deterministic overlap formula intentionally uses names only.
+  const selectedIngredients = flow.ingredients
   const selectedIngredientNames = useMemo(
-    () => flow.ingredients.map((ingredient) => ingredient.name),
-    [flow.ingredients],
+    () => selectedIngredients.map((ingredient) => ingredient.name),
+    [selectedIngredients],
   )
 
   const recipesQuery = useRecipes({ page: 1, per_page: 50, sort: 'name' })

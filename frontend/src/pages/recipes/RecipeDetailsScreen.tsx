@@ -3,10 +3,7 @@ import { Clock, Heart, Users } from 'lucide-react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { MobileScreen } from '../../components/layout/MobileScreen'
 import { ScreenHeader } from '../../components/layout/ScreenHeader'
-import {
-  ApiRecipeIngredientList,
-  type UserQuantity,
-} from '../../components/recipes/ApiRecipeIngredientList'
+import { ApiRecipeIngredientList } from '../../components/recipes/ApiRecipeIngredientList'
 import { RecipeDataQualityPanel } from '../../components/recipes/RecipeDataQualityPanel'
 import { RecipeSourceList } from '../../components/recipes/RecipeSourceList'
 import { RecipeTabs } from '../../components/recipes/RecipeTabs'
@@ -24,9 +21,9 @@ import type {
   RecipeMethodSummaryViewModel,
 } from '../../services/mappers/recipeMappers'
 import { parseApiId } from '../../services/queries/queryKeys'
-import type { IngredientWithQuantity } from '../../types/ingredients'
 import type { RecipeTab } from '../../types/recipe'
 import { cn } from '../../utils/cn'
+import { collectUserQuantities } from '../../utils/cookingRecipe'
 
 interface RecipeDetailsRouteState {
   servings?: number
@@ -46,31 +43,6 @@ function minuteLabel(minutes: number | null): string {
   return typeof minutes === 'number' && Number.isFinite(minutes)
     ? `${minutes} min`
     : 'Not provided'
-}
-
-function normalizeName(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/\([^)]*\)/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
-
-function collectUserQuantities(
-  ingredients: IngredientWithQuantity[],
-): Map<string, UserQuantity> {
-  const quantities = new Map<string, UserQuantity>()
-  for (const ingredient of ingredients) {
-    const key = normalizeName(ingredient.name)
-    if (key && !quantities.has(key)) {
-      quantities.set(key, {
-        quantity: ingredient.quantity,
-        unit: ingredient.unit,
-      })
-    }
-  }
-  return quantities
 }
 
 function summaryParts(instruction: InstructionViewModel) {

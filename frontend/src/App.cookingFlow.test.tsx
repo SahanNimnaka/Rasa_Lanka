@@ -3,8 +3,12 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { AppRoutes } from './App'
+import { COOKING_FLOW_STORAGE_KEY } from './context/cookingFlowStore'
 import { mockApiAdapter } from './test/apiMock'
 import {
+  ingredientCategoryDto,
+  ingredientDetailDto,
+  ingredientDto,
   itemEnvelope,
   paginatedEnvelope,
   recipeDetailDto,
@@ -54,9 +58,21 @@ describe('Screens 11–15 cooking flow', () => {
     sessionStorage.clear()
   })
 
-  it('preserves quantities and servings across the flow and browser history', async () => {
+  it('preserves catalogued quantities and servings across the flow and browser history', async () => {
     setApiAdapter(async (config) => {
       const url = config.url ?? ''
+      if (url === '/ingredients') {
+        return makeAxiosResponse(config, paginatedEnvelope([ingredientDto]))
+      }
+      if (url === '/ingredient-categories') {
+        return makeAxiosResponse(
+          config,
+          paginatedEnvelope([ingredientCategoryDto]),
+        )
+      }
+      if (url === '/ingredients/81') {
+        return makeAxiosResponse(config, itemEnvelope(ingredientDetailDto))
+      }
       if (url === '/recipes') {
         return makeAxiosResponse(
           config,
@@ -87,16 +103,36 @@ describe('Screens 11–15 cooking flow', () => {
     const user = userEvent.setup()
     renderFlow()
 
+    // Demo detections are no longer auto-selected. A real catalogue ID is
+    // required before the flow can continue.
+    await user.click(
+      screen.getByRole('button', { name: 'Add Ingredient Manually' }),
+    )
+    const catalogueCheckbox = await screen.findByRole('checkbox', {
+      name: 'Select Red lentils (masoor dhal)',
+    })
+    await user.click(catalogueCheckbox)
+    expect(catalogueCheckbox).toBeChecked()
+    expect(
+      screen.getByRole('heading', { name: 'Final selection (1)' }),
+    ).toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: 'Confirm & Continue' }))
     expect(
       await screen.findByRole('heading', {
         name: 'Enter Ingredient Quantities',
       }),
     ).toBeInTheDocument()
+    expect(screen.getByText('Catalogue ingredient #81')).toBeInTheDocument()
 
-    const quantity = screen.getByLabelText('Quantity for Red lentils')
+    const quantity = screen.getByLabelText(
+      'Quantity for Red lentils (masoor dhal)',
+    )
     await user.clear(quantity)
     await user.type(quantity, '250')
+    const unit = screen.getByLabelText('Unit for Red lentils (masoor dhal)')
+    await user.clear(unit)
+    await user.type(unit, 'g')
 
     await user.click(screen.getByRole('button', { name: 'History back' }))
     expect(
@@ -105,8 +141,11 @@ describe('Screens 11–15 cooking flow', () => {
 
     await user.click(screen.getByRole('button', { name: 'History forward' }))
     expect(
-      await screen.findByLabelText('Quantity for Red lentils'),
+      await screen.findByLabelText('Quantity for Red lentils (masoor dhal)'),
     ).toHaveValue('250')
+    expect(
+      screen.getByLabelText('Unit for Red lentils (masoor dhal)'),
+    ).toHaveValue('g')
 
     await user.click(screen.getByRole('button', { name: 'Next' }))
     expect(
@@ -128,6 +167,20 @@ describe('Screens 11–15 cooking flow', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('250 g')).toBeInTheDocument()
     expect(screen.getByText('3 servings')).toBeInTheDocument()
+
+    const storedFlow = JSON.parse(
+      sessionStorage.getItem(COOKING_FLOW_STORAGE_KEY) ?? '{}',
+    ) as {
+      ingredients: Array<{ id: string; quantity: string; unit: string }>
+      servings: number
+    }
+    expect(storedFlow.ingredients).toHaveLength(1)
+    expect(storedFlow.ingredients[0]).toMatchObject({
+      id: '81',
+      quantity: '250',
+      unit: 'g',
+    })
+    expect(storedFlow.servings).toBe(3)
 
     await user.click(screen.getByRole('button', { name: 'Start Cooking' }))
     expect(

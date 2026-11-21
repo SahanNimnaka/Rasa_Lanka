@@ -13,7 +13,6 @@ import {
 import type {
   IngredientQuantitiesState,
   IngredientWithQuantity,
-  MeasurementUnit,
 } from '../../types/ingredients'
 
 export function IngredientQuantitiesScreen() {
@@ -47,7 +46,7 @@ export function IngredientQuantitiesScreen() {
 
   function handleUpdate(
     id: string,
-    update: { quantity?: string; unit?: MeasurementUnit },
+    update: { quantity?: string; unit?: string },
   ) {
     setDraftIngredients((current) =>
       current.map((ingredient) =>

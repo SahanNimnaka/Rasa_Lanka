@@ -430,9 +430,9 @@ describe('CookingInstructionsScreen', () => {
     seedFlow({
       ingredients: [
         {
-          id: 'demo-red-lentils',
+          id: '81',
           name: 'Red lentils',
-          source: 'demo',
+          source: 'catalogue',
           quantity: '250',
           unit: 'g',
         },
