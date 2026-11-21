@@ -110,4 +110,14 @@ class Recipe extends Model
     {
         return $this->hasMany(DataQualityIssue::class);
     }
+
+    public function savedRecipes(): HasMany
+    {
+        return $this->hasMany(SavedRecipe::class);
+    }
+
+    public function recipeViews(): HasMany
+    {
+        return $this->hasMany(RecipeView::class);
+    }
 }

@@ -5,6 +5,10 @@ import type {
   RecipeCategoryListParams,
 } from '../../types/apiIngredients'
 import type { RecipeListParams } from '../../types/apiRecipes'
+import type {
+  RecipeHistoryListParams,
+  SavedRecipesListParams,
+} from '../../types/apiUserRecipes'
 
 type SerializableParamValue =
   | string
@@ -97,6 +101,20 @@ export const queryKeys = {
     detail: (id: number) =>
       [...queryKeys.recipes.details(), { id }] as const,
     invalidDetail: () => [...queryKeys.recipes.details(), 'invalid'] as const,
+  },
+
+  savedRecipes: {
+    all: () => [...queryKeys.all, 'saved-recipes'] as const,
+    lists: () => [...queryKeys.savedRecipes.all(), 'list'] as const,
+    list: (params: SavedRecipesListParams = {}) =>
+      [...queryKeys.savedRecipes.lists(), normalizeParams(params)] as const,
+  },
+
+  recipeHistory: {
+    all: () => [...queryKeys.all, 'recipe-history'] as const,
+    lists: () => [...queryKeys.recipeHistory.all(), 'list'] as const,
+    list: (params: RecipeHistoryListParams = {}) =>
+      [...queryKeys.recipeHistory.lists(), normalizeParams(params)] as const,
   },
 
   ingredients: {

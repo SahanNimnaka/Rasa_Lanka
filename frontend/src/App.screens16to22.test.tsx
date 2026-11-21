@@ -4,8 +4,29 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { AppRoutes } from './App'
 import { mockApiAdapter } from './test/apiMock'
-import { itemEnvelope, recipeDetailDto } from './test/queryFixtures'
+import {
+  itemEnvelope,
+  paginatedEnvelope,
+  recipeDetailDto,
+  recipeSummaryDto,
+} from './test/queryFixtures'
 import { makeAxiosResponse, setApiAdapter } from './test/queryTestUtils'
+import type { RecipeViewDto } from './types/apiUserRecipes'
+
+function apiViewDto(): RecipeViewDto {
+  return {
+    id: 1,
+    recipe_id: 11,
+    recipe: {
+      ...recipeSummaryDto,
+      id: 11,
+      name: 'Sri Lankan Parippu Curry',
+    },
+    viewed_at: '2026-11-21T08:00:00.000000Z',
+    created_at: '2026-11-21T08:00:00.000000Z',
+    updated_at: '2026-11-21T08:00:00.000000Z',
+  }
+}
 
 function renderRoutes(initialEntry: string) {
   return render(
@@ -22,8 +43,20 @@ describe('Screens 16–23 routes', () => {
     delete document.documentElement.dataset.theme
     document.documentElement.classList.remove('theme-dark')
     setApiAdapter(async (config) => {
-      if (config.url === '/recipes/11') {
+      const method = config.method?.toLowerCase() ?? 'get'
+      const url = config.url ?? ''
+
+      if (method === 'get' && url === '/recipes/11') {
         return makeAxiosResponse(config, itemEnvelope(recipeDetailDto))
+      }
+      if (method === 'get' && url === '/saved-recipes') {
+        return makeAxiosResponse(config, paginatedEnvelope([]))
+      }
+      if (method === 'get' && url === '/recipe-history') {
+        return makeAxiosResponse(config, paginatedEnvelope([apiViewDto()]))
+      }
+      if (method === 'post' && url === '/recipe-history') {
+        return makeAxiosResponse(config, itemEnvelope(apiViewDto()))
       }
       return mockApiAdapter(config)
     })
@@ -46,13 +79,15 @@ describe('Screens 16–23 routes', () => {
     ).toBeInTheDocument()
   })
 
-  it('keeps the existing demo history entries visible', async () => {
+  it('loads Laravel-backed history entries', async () => {
     renderRoutes('/history')
 
     expect(
       await screen.findByRole('heading', { name: 'History' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('Dhal Curry')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Sri Lankan Parippu Curry'),
+    ).toBeInTheDocument()
     expect(screen.queryByText('Your history is empty')).not.toBeInTheDocument()
   })
 

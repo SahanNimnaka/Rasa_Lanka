@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\V1\IngredientCategoryController;
 use App\Http\Controllers\Api\V1\IngredientController;
 use App\Http\Controllers\Api\V1\RecipeCategoryController;
 use App\Http\Controllers\Api\V1\RecipeController;
+use App\Http\Controllers\Api\V1\RecipeHistoryController;
+use App\Http\Controllers\Api\V1\SavedRecipeController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->as('v1.')->group(function () {
@@ -47,6 +49,22 @@ Route::prefix('v1')->as('v1.')->group(function () {
             Route::get('/me', [AuthController::class, 'me'])->name('me');
             Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
         });
+    });
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('/saved-recipes', [SavedRecipeController::class, 'index'])
+            ->name('saved-recipes.index');
+        Route::post('/saved-recipes', [SavedRecipeController::class, 'store'])
+            ->name('saved-recipes.store');
+        Route::delete('/saved-recipes/{recipe}', [SavedRecipeController::class, 'destroy'])
+            ->name('saved-recipes.destroy');
+
+        Route::get('/recipe-history', [RecipeHistoryController::class, 'index'])
+            ->name('recipe-history.index');
+        Route::post('/recipe-history', [RecipeHistoryController::class, 'store'])
+            ->name('recipe-history.store');
+        Route::delete('/recipe-history', [RecipeHistoryController::class, 'destroy'])
+            ->name('recipe-history.destroy');
     });
 });
 

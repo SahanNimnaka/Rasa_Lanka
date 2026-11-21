@@ -12,6 +12,7 @@ import { useNavigateBack } from '../../hooks/useNavigateBack'
 import {
   useRecipeDetails,
   useRecipes,
+  useToggleSavedRecipe,
 } from '../../hooks/queries'
 import {
   createApiRecommendationCandidates,
@@ -57,6 +58,7 @@ export function RecipeRecommendationsScreen() {
   const location = useLocation()
   const goBack = useNavigateBack('/ingredients/serving-size')
   const flow = useCookingFlow()
+  const toggleSavedRecipe = useToggleSavedRecipe()
 
   const routeServings = (location.state as RecommendationsRouteState | null)
     ?.servings
@@ -232,7 +234,7 @@ export function RecipeRecommendationsScreen() {
                     meta={candidateMeta(recipe)}
                     name={recipe.summary.name}
                     onSelect={() => handleSelectRecipe(recipe.id)}
-                    onToggleFavorite={() => flow.toggleFavorite(recipe.id)}
+                    onToggleFavorite={() => void toggleSavedRecipe(recipe.id)}
                   />
                 ))}
               </div>

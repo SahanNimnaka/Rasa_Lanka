@@ -5,37 +5,38 @@ import { MobileScreen } from '../../components/layout/MobileScreen'
 import { ScreenHeader } from '../../components/layout/ScreenHeader'
 import { Button } from '../../components/ui/Button'
 import { Card } from '../../components/ui/Card'
+import { LoadingIndicator } from '../../components/ui/LoadingIndicator'
 import { WireframeImagePlaceholder } from '../../components/ui/WireframeImagePlaceholder'
 import { useAppState } from '../../context/appStateStore'
 import { useNavigateBack } from '../../hooks/useNavigateBack'
+import {
+  useClearRecipeHistory,
+  useRecipeHistory,
+} from '../../hooks/queries'
 import { formatViewedAt } from '../../services/appStateService'
-import { getRecipeById } from '../../services/mockRecipeService'
+import { parseApiId } from '../../services/queries/queryKeys'
 
 export function HistoryScreen() {
   const navigate = useNavigate()
   const goBack = useNavigateBack('/home')
-  const { clearHistory, history } = useAppState()
+  const { clearHistory } = useAppState()
+  const historyQuery = useRecipeHistory()
+  const { mutateAsync: clearHistoryApi, isPending: isClearing } =
+    useClearRecipeHistory()
   const [showConfirmation, setShowConfirmation] = useState(false)
   const [status, setStatus] = useState('')
 
-  const entries = history.reduce(
-    (items, entry) => {
-      const recipe = getRecipeById(entry.recipeId)
-      if (recipe) {
-        items.push({ entry, recipe })
-      }
-      return items
-    },
-    [] as Array<{
-      entry: (typeof history)[number]
-      recipe: NonNullable<ReturnType<typeof getRecipeById>>
-    }>,
-  )
+  const items = historyQuery.data?.pages.flatMap((page) => page.data) ?? []
 
-  function handleClearHistory() {
-    clearHistory()
-    setShowConfirmation(false)
-    setStatus('History cleared.')
+  async function handleClearHistory() {
+    try {
+      await clearHistoryApi()
+      clearHistory()
+      setShowConfirmation(false)
+      setStatus('History cleared.')
+    } catch {
+      setStatus('Could not clear history. Please try again.')
+    }
   }
 
   return (
@@ -58,7 +59,25 @@ export function HistoryScreen() {
           Recipes you explored recently.
         </p>
 
-        {entries.length === 0 ? (
+        {historyQuery.isPending && items.length === 0 ? (
+          <div className="mt-8">
+            <LoadingIndicator label="Loading recipe history..." />
+          </div>
+        ) : historyQuery.isError && items.length === 0 ? (
+          <div className="glass-panel mt-8 rounded-2xl p-6 text-center">
+            <h3 className="text-base font-bold">History could not load</h3>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              {historyQuery.error.message}
+            </p>
+            <Button
+              className="mt-4"
+              onClick={() => void historyQuery.refetch()}
+              size="sm"
+            >
+              Try again
+            </Button>
+          </div>
+        ) : items.length === 0 ? (
           <div className="glass-panel mt-8 rounded-2xl p-6 text-center">
             <h3 className="text-base font-bold">Your history is empty</h3>
             <p className="mt-2 text-sm leading-6 text-muted">
@@ -74,25 +93,45 @@ export function HistoryScreen() {
           </div>
         ) : (
           <div className="mt-5 grid gap-3 md:grid-cols-2 md:gap-5">
-            {entries.map(({ entry, recipe }) => (
-              <button
-                className="glass-panel flex w-full items-center gap-4 rounded-2xl p-2.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-elevated"
-                key={entry.id}
-                onClick={() => navigate(`/recipes/${recipe.id}`)}
-                type="button"
-              >
-                <WireframeImagePlaceholder className="h-[88px] w-[88px]" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-bold text-ink">
-                    {recipe.name}
+            {items.map((item) => {
+              const recipeId = parseApiId(item.recipeId)
+              return (
+                <button
+                  className="glass-panel flex w-full items-center gap-4 rounded-2xl p-2.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-elevated"
+                  key={item.id}
+                  onClick={() => {
+                    if (recipeId !== null) {
+                      navigate(`/recipes/${recipeId}`)
+                    }
+                  }}
+                  type="button"
+                >
+                  <WireframeImagePlaceholder className="h-[88px] w-[88px]" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-ink">
+                      {item.recipe.name}
+                    </span>
+                    <span className="mt-2 flex items-center gap-1 text-xs text-muted">
+                      <Clock3 aria-hidden="true" size={13} />
+                      {formatViewedAt(item.viewedAt)}
+                    </span>
                   </span>
-                  <span className="mt-2 flex items-center gap-1 text-xs text-muted">
-                    <Clock3 aria-hidden="true" size={13} />
-                    {formatViewedAt(entry.viewedAt)}
-                  </span>
-                </span>
-              </button>
-            ))}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {historyQuery.hasNextPage && (
+          <div className="mt-6 flex justify-center">
+            <Button
+              disabled={historyQuery.isFetchingNextPage}
+              onClick={() => void historyQuery.fetchNextPage()}
+              size="sm"
+              variant="secondary"
+            >
+              {historyQuery.isFetchingNextPage ? 'Loading more...' : 'Load more'}
+            </Button>
           </div>
         )}
       </section>
@@ -101,6 +140,7 @@ export function HistoryScreen() {
         {!showConfirmation ? (
           <Button
             className="h-[46px] w-full"
+            disabled={isClearing}
             onClick={() => setShowConfirmation(true)}
             size="lg"
             variant="secondary"
@@ -115,7 +155,7 @@ export function HistoryScreen() {
           >
             <h2 className="text-base font-bold">Delete all history?</h2>
             <p className="mt-2 text-sm leading-6 text-muted">
-              This removes every recipe from this local history list.
+              This removes every recipe from your saved history.
             </p>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <Button
@@ -124,8 +164,12 @@ export function HistoryScreen() {
               >
                 Cancel
               </Button>
-              <Button onClick={handleClearHistory} variant="danger">
-                Clear history
+              <Button
+                disabled={isClearing}
+                onClick={() => void handleClearHistory()}
+                variant="danger"
+              >
+                {isClearing ? 'Clearing...' : 'Clear history'}
               </Button>
             </div>
           </Card>

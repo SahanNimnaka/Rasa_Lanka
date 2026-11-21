@@ -9,6 +9,10 @@ import type {
   RecipeDetailDto,
   RecipeSummaryDto,
 } from '../types/apiRecipes'
+import type {
+  RecipeViewDto,
+  SavedRecipeDto,
+} from '../types/apiUserRecipes'
 
 export function itemEnvelope<T>(data: T): ApiEnvelope<T> {
   return {
@@ -139,4 +143,21 @@ export const ingredientDto: IngredientDto = {
 
 export const ingredientDetailDto: IngredientDetailDto = {
   ...ingredientDto,
+}
+
+export const savedRecipeDto: SavedRecipeDto = {
+  id: 42,
+  recipe_id: recipeSummaryDto.id,
+  recipe: recipeSummaryDto,
+  created_at: '2026-11-20T10:15:00+00:00',
+  updated_at: '2026-11-20T10:15:00+00:00',
+}
+
+export const recipeViewDto: RecipeViewDto = {
+  id: 77,
+  recipe_id: recipeSummaryDto.id,
+  recipe: recipeSummaryDto,
+  viewed_at: '2026-11-21T08:30:00+00:00',
+  created_at: '2026-11-21T08:30:00+00:00',
+  updated_at: '2026-11-21T08:30:00+00:00',
 }

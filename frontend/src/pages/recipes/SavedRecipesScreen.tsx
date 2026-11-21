@@ -1,18 +1,20 @@
 import { useState } from 'react'
-import { Clock, Heart, Star } from 'lucide-react'
+import { Clock, Heart } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { MobileScreen } from '../../components/layout/MobileScreen'
 import { ScreenHeader } from '../../components/layout/ScreenHeader'
 import { BottomNavigation } from '../../components/navigation/BottomNavigation'
 import { Button } from '../../components/ui/Button'
 import { ChoiceChip } from '../../components/ui/ChoiceChip'
+import { LoadingIndicator } from '../../components/ui/LoadingIndicator'
 import { WireframeImagePlaceholder } from '../../components/ui/WireframeImagePlaceholder'
 import { useCookingFlow } from '../../context/cookingFlowStore'
 import { useNavigateBack } from '../../hooks/useNavigateBack'
-import { getRecipeById } from '../../services/mockRecipeService'
-import type { Recipe, RecipeCategory } from '../../types/recipe'
+import { useSavedRecipes, useUnsaveRecipe } from '../../hooks/queries'
+import type { SavedRecipeViewModel } from '../../services/mappers/savedRecipeMappers'
+import { parseApiId } from '../../services/queries/queryKeys'
 
-type SavedFilter = 'all' | RecipeCategory
+type SavedFilter = 'all' | 'curry' | 'sambol' | 'other'
 
 const FILTERS: Array<{ id: SavedFilter; label: string }> = [
   { id: 'all', label: 'All' },
@@ -21,17 +23,32 @@ const FILTERS: Array<{ id: SavedFilter; label: string }> = [
   { id: 'other', label: 'Others' },
 ]
 
-interface SavedRecipeRowProps {
-  onSelect: () => void
-  onToggleFavorite: () => void
-  recipe: Recipe
+function categoryLabel(item: SavedRecipeViewModel): string {
+  return (
+    item.recipe.recipeCategory?.name?.trim() ||
+    item.recipe.recipeType?.trim() ||
+    'Recipe'
+  )
 }
 
-function SavedRecipeRow({
-  onSelect,
-  onToggleFavorite,
-  recipe,
-}: SavedRecipeRowProps) {
+function itemFilter(item: SavedRecipeViewModel): Exclude<SavedFilter, 'all'> {
+  const label = `${categoryLabel(item)} ${item.recipe.recipeType ?? ''}`.toLowerCase()
+  if (label.includes('curry')) {
+    return 'curry'
+  }
+  if (label.includes('sambol')) {
+    return 'sambol'
+  }
+  return 'other'
+}
+
+interface SavedRecipeRowProps {
+  item: SavedRecipeViewModel
+  onRemove: () => void
+  onSelect: () => void
+}
+
+function SavedRecipeRow({ item, onRemove, onSelect }: SavedRecipeRowProps) {
   return (
     <div className="glass-panel mb-3 flex items-center gap-3 rounded-2xl p-2.5 md:mb-0">
       <button
@@ -42,28 +59,23 @@ function SavedRecipeRow({
         <WireframeImagePlaceholder className="h-[92px] w-[92px]" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-bold text-ink">
-            {recipe.name}
+            {item.recipe.name}
           </span>
           <span className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
-            <span className="flex items-center gap-1">
-              <Star
-                aria-hidden="true"
-                className="fill-spice-orange text-spice-orange"
-                size={14}
-              />
-              {recipe.rating}
-            </span>
+            <span className="truncate">{categoryLabel(item)}</span>
             <span className="flex items-center gap-1">
               <Clock aria-hidden="true" size={14} />
-              {recipe.durationMinutes} min
+              {item.recipe.durationMinutes === null
+                ? 'Time not provided'
+                : `${item.recipe.durationMinutes} min`}
             </span>
           </span>
         </span>
       </button>
       <button
-        aria-label={`Remove ${recipe.name} from favourites`}
+        aria-label={`Remove ${item.recipe.name} from favourites`}
         className="flex shrink-0 items-center gap-1 rounded-full bg-chilli-red/10 px-2.5 py-2 text-xs font-bold text-chilli-red"
-        onClick={onToggleFavorite}
+        onClick={onRemove}
         type="button"
       >
         <Heart
@@ -81,23 +93,34 @@ export function SavedRecipesScreen() {
   const navigate = useNavigate()
   const goBack = useNavigateBack('/home')
   const flow = useCookingFlow()
+  const { mutateAsync: unsaveRecipe } = useUnsaveRecipe()
   const [filter, setFilter] = useState<SavedFilter>('all')
+  const [status, setStatus] = useState('')
 
-  const savedRecipes = flow.favoriteRecipeIds.reduce<Recipe[]>(
-    (recipes, recipeId) => {
-      const recipe = getRecipeById(recipeId)
-      if (recipe) {
-        recipes.push(recipe)
-      }
-      return recipes
-    },
-    [],
-  )
+  const savedQuery = useSavedRecipes()
+  const items = savedQuery.data?.pages.flatMap((page) => page.data) ?? []
 
-  const visibleRecipes =
+  const visibleItems =
     filter === 'all'
-      ? savedRecipes
-      : savedRecipes.filter((recipe) => recipe.category === filter)
+      ? items
+      : items.filter((item) => itemFilter(item) === filter)
+
+  async function handleRemove(item: SavedRecipeViewModel) {
+    const recipeId = parseApiId(item.recipeId)
+    if (recipeId === null) {
+      return
+    }
+
+    try {
+      await unsaveRecipe(recipeId)
+      if (flow.favoriteRecipeIds.includes(item.recipeId)) {
+        flow.toggleFavorite(item.recipeId)
+      }
+      setStatus(`${item.recipe.name} removed from saved recipes.`)
+    } catch {
+      setStatus(`Could not remove ${item.recipe.name}. Please try again.`)
+    }
+  }
 
   return (
     <MobileScreen aria-labelledby="saved-title" className="pb-28">
@@ -126,40 +149,82 @@ export function SavedRecipesScreen() {
         ))}
       </div>
 
-      {visibleRecipes.length === 0 ? (
+      {savedQuery.isPending && items.length === 0 ? (
+        <div className="mt-8">
+          <LoadingIndicator label="Loading saved recipes..." />
+        </div>
+      ) : savedQuery.isError && items.length === 0 ? (
+        <div className="glass-panel mt-8 rounded-2xl p-6 text-center">
+          <h2 className="text-base font-bold">Saved recipes could not load</h2>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            {savedQuery.error.message}
+          </p>
+          <Button
+            className="mt-5"
+            onClick={() => void savedQuery.refetch()}
+            size="sm"
+          >
+            Try again
+          </Button>
+        </div>
+      ) : visibleItems.length === 0 ? (
         <div className="glass-panel mt-8 rounded-2xl p-6 text-center">
           <h2 className="text-base font-bold">
-            {savedRecipes.length === 0
+            {items.length === 0
               ? 'No saved recipes yet'
               : 'No saved recipes in this category'}
           </h2>
           <p className="mt-2 text-sm leading-6 text-muted">
-            {savedRecipes.length === 0
+            {items.length === 0
               ? 'Tap the heart on a recipe to save it here.'
               : 'Choose another category to see your saved recipes.'}
           </p>
           <Button
             className="mt-5"
             onClick={() =>
-              savedRecipes.length === 0 ? navigate('/search') : setFilter('all')
+              items.length === 0 ? navigate('/search') : setFilter('all')
             }
             size="sm"
           >
-            {savedRecipes.length === 0 ? 'Browse recipes' : 'Show all saved'}
+            {items.length === 0 ? 'Browse recipes' : 'Show all saved'}
           </Button>
         </div>
       ) : (
         <div className="mt-4 grid md:grid-cols-2 md:gap-4 lg:grid-cols-3">
-          {visibleRecipes.map((recipe) => (
-            <SavedRecipeRow
-              key={recipe.id}
-              onSelect={() => navigate(`/recipes/${recipe.id}`)}
-              onToggleFavorite={() => flow.toggleFavorite(recipe.id)}
-              recipe={recipe}
-            />
-          ))}
+          {visibleItems.map((item) => {
+            const recipeId = parseApiId(item.recipeId)
+            return (
+              <SavedRecipeRow
+                item={item}
+                key={item.id}
+                onRemove={() => void handleRemove(item)}
+                onSelect={() => {
+                  if (recipeId !== null) {
+                    navigate(`/recipes/${recipeId}`)
+                  }
+                }}
+              />
+            )
+          })}
         </div>
       )}
+
+      {savedQuery.hasNextPage && (
+        <div className="mt-6 flex justify-center">
+          <Button
+            disabled={savedQuery.isFetchingNextPage}
+            onClick={() => void savedQuery.fetchNextPage()}
+            size="sm"
+            variant="secondary"
+          >
+            {savedQuery.isFetchingNextPage ? 'Loading more...' : 'Load more'}
+          </Button>
+        </div>
+      )}
+
+      <p aria-live="polite" className="sr-only">
+        {status}
+      </p>
 
       <BottomNavigation />
     </MobileScreen>

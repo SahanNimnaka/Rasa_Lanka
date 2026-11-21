@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type ReactNode } from 'react'
+import { use, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import {
   BrowserRouter,
@@ -12,7 +12,7 @@ import {
 import { AppStateProvider } from './context/AppStateContext'
 import { AuthProvider } from './context/AuthProvider'
 import { CookingFlowProvider } from './context/CookingFlowContext'
-import { useAppState } from './context/appStateStore'
+import { AuthContext } from './context/authStore'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CookingGuidanceScreen } from './pages/cooking/CookingGuidanceScreen'
 import { CookingInstructionsScreen } from './pages/cooking/CookingInstructionsScreen'
@@ -36,8 +36,9 @@ import { CookingPreferencesScreen } from './pages/preferences/CookingPreferences
 import { SettingsScreen } from './pages/settings/SettingsScreen'
 import { AboutScreen } from './pages/about/AboutScreen'
 import { FeaturePlaceholderScreen } from './pages/placeholders/FeaturePlaceholderScreen'
+import { useRecipe, useRecordRecipeView } from './hooks/queries'
 import { queryClient } from './lib/queryClient'
-import { getRecipeById } from './services/mockRecipeService'
+import { parseApiId } from './services/queries/queryKeys'
 
 function SplashRoute() {
   const navigate = useNavigate()
@@ -67,13 +68,38 @@ function IngredientRecognitionRoute() {
 
 function RecipeViewRoute({ children }: { children: ReactNode }) {
   const { recipeId } = useParams()
-  const { recordRecipeView } = useAppState()
+  const auth = use(AuthContext)
+  const numericId = parseApiId(recipeId)
+  const recipeQuery = useRecipe(recipeId)
+  const { mutate: recordView } = useRecordRecipeView()
+  const recordedForRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (recipeId && getRecipeById(recipeId)) {
-      recordRecipeView(recipeId)
+    if (
+      !auth?.isAuthenticated ||
+      numericId === null ||
+      !recipeQuery.isSuccess
+    ) {
+      return
     }
-  }, [recipeId, recordRecipeView])
+
+    const resolvedId = recipeQuery.data.id
+    if (
+      resolvedId !== String(numericId) ||
+      recordedForRef.current === resolvedId
+    ) {
+      return
+    }
+
+    recordedForRef.current = resolvedId
+    recordView(numericId)
+  }, [
+    auth?.isAuthenticated,
+    numericId,
+    recordView,
+    recipeQuery.data?.id,
+    recipeQuery.isSuccess,
+  ])
 
   return <>{children}</>
 }

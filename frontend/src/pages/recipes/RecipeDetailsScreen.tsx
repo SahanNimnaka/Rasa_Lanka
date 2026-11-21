@@ -17,7 +17,7 @@ import { LoadingIndicator } from '../../components/ui/LoadingIndicator'
 import { WireframeImagePlaceholder } from '../../components/ui/WireframeImagePlaceholder'
 import { useCookingFlow } from '../../context/cookingFlowStore'
 import { useNavigateBack } from '../../hooks/useNavigateBack'
-import { useRecipe } from '../../hooks/queries'
+import { useRecipe, useToggleSavedRecipe } from '../../hooks/queries'
 import type {
   RecipeDetailViewModel,
   RecipeInstructionViewModel,
@@ -202,6 +202,7 @@ export function RecipeDetailsScreen() {
   const { recipeId } = useParams()
   const goBack = useNavigateBack('/recipes/recommendations')
   const flow = useCookingFlow()
+  const toggleSavedRecipe = useToggleSavedRecipe()
 
   const routeState = location.state as RecipeDetailsRouteState | null
   const [activeTab, setActiveTab] = useState<RecipeTab>(
@@ -324,7 +325,7 @@ export function RecipeDetailsScreen() {
             }
             aria-pressed={isFavorite}
             className="absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-chilli-red shadow-card"
-            onClick={() => flow.toggleFavorite(recipe.id)}
+            onClick={() => void toggleSavedRecipe(recipe.id)}
             type="button"
           >
             <Heart
