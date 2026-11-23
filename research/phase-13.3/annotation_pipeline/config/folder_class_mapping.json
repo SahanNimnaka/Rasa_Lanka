@@ -1,0 +1,394 @@
+{
+  "config_version": "folder-class-mapping-v1",
+  "schema_version": "machine-annotation-v1",
+  "source_dataset": "research/phase-13.3/collected_dataset",
+  "taxonomy_source": "config/approved_taxonomy.json",
+  "generated_at": "2026-11-23T20:41:03.621875+00:00",
+  "policy": {
+    "folder_names_are_not_ground_truth": true,
+    "visual_review_required_before_training": true,
+    "uncertain_mappings_use_null_proposed_class": true,
+    "no_new_classes": true,
+    "no_automatic_merge_of_similar_folders": true
+  },
+  "summary": {
+    "folder_count": 35,
+    "image_count": 24356,
+    "proposed_pending_review": 22,
+    "ambiguous_pending_review": 8,
+    "out_of_scope": 3,
+    "unmapped": 2,
+    "approved": 0
+  },
+  "mappings": [
+    {
+      "folder_name": "Black Pepper",
+      "image_count": 620,
+      "proposed_class_id": null,
+      "candidate_class_ids": [
+        "black_pepper_whole",
+        "black_pepper_ground"
+      ],
+      "mapping_status": "ambiguous_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Generic name does not distinguish whole peppercorns from ground pepper; both classes are approved. No forced mapping."
+    },
+    {
+      "folder_name": "Cardamom",
+      "image_count": 615,
+      "proposed_class_id": "cardamom_pod",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct name match to the pod class. Pod form still needs visual confirmation; never treat folder name as ground truth."
+    },
+    {
+      "folder_name": "Chiken",
+      "image_count": 56,
+      "proposed_class_id": "chicken",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Misspelling of Chicken. Spelling-based proposal only; visual inspection required."
+    },
+    {
+      "folder_name": "Chile Flakes",
+      "image_count": 25,
+      "proposed_class_id": "chilli_flake",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Spelling variant of chilli flakes. Keep distinct from whole dried chillies and chilli powder."
+    },
+    {
+      "folder_name": "Chili Powder",
+      "image_count": 931,
+      "proposed_class_id": "chilli_powder",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Spelling variant of chilli powder. Roast state of catalogue variants is not visually reliable."
+    },
+    {
+      "folder_name": "Cinnamon",
+      "image_count": 402,
+      "proposed_class_id": "cinnamon_bark",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct match to bark/quill class. Ceylon-specific catalogue variant cannot be separated without packaging evidence."
+    },
+    {
+      "folder_name": "Cloves",
+      "image_count": 303,
+      "proposed_class_id": "clove",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct name match. Tiny buds need close-up and scale-reference QA."
+    },
+    {
+      "folder_name": "Coconut milk",
+      "image_count": 11,
+      "proposed_class_id": "coconut_milk",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct match. Thick/thin catalogue variants are not separable from unlabelled liquid."
+    },
+    {
+      "folder_name": "Coconut oil",
+      "image_count": 18,
+      "proposed_class_id": null,
+      "candidate_class_ids": [],
+      "mapping_status": "out_of_scope",
+      "out_of_scope_class_id": "coconut_oil",
+      "requires_visual_review": true,
+      "rationale": "Explicitly out-of-scope in the pilot label set; oil type is not visually identifiable without label or solid state."
+    },
+    {
+      "folder_name": "Coriander",
+      "image_count": 796,
+      "proposed_class_id": null,
+      "candidate_class_ids": [
+        "coriander_seed"
+      ],
+      "mapping_status": "ambiguous_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Folder name omits seed vs leaf. Only coriander_seed is approved; coriander leaves have no approved class. No forced mapping."
+    },
+    {
+      "folder_name": "Curry Leavf",
+      "image_count": 114,
+      "proposed_class_id": "curry_leaves",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Folder name contains a typo ('Leavf') but strongly indicates curry leaves. Spelling-only proposal; visual confirmation required."
+    },
+    {
+      "folder_name": "dhal",
+      "image_count": 23,
+      "proposed_class_id": null,
+      "candidate_class_ids": [
+        "red_lentils"
+      ],
+      "mapping_status": "ambiguous_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Lowercase local name may mean raw red lentils or a cooked dhal dish. Processing state unverified; no forced mapping."
+    },
+    {
+      "folder_name": "Egg Plant",
+      "image_count": 1017,
+      "proposed_class_id": "brinjal",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Naming variant of brinjal/eggplant. Visual confirmation still required."
+    },
+    {
+      "folder_name": "Fish",
+      "image_count": 3000,
+      "proposed_class_id": "fish",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Generic fish class. Species-specific catalogue variants are not verifiable from an unlabelled folder name."
+    },
+    {
+      "folder_name": "Ginger",
+      "image_count": 178,
+      "proposed_class_id": "ginger_root",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Fresh root is the only approved ginger class; verify images are not processed ginger. Some legacy files are 32x32."
+    },
+    {
+      "folder_name": "Gralic",
+      "image_count": 599,
+      "proposed_class_id": "garlic_clove",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Misspelling of Garlic. Spelling-based proposal only; confirm cloves/bulbs rather than paste."
+    },
+    {
+      "folder_name": "Grated coconut",
+      "image_count": 22,
+      "proposed_class_id": "grated_coconut",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct match. Fresh vs desiccated state is not reliably visible after grating."
+    },
+    {
+      "folder_name": "Green Chili",
+      "image_count": 49,
+      "proposed_class_id": "green_chilli",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Spelling variant of green chilli. Legacy set contains only tiny 32x32 images; quality replacement required before use."
+    },
+    {
+      "folder_name": "Jack",
+      "image_count": 430,
+      "proposed_class_id": null,
+      "candidate_class_ids": [
+        "mature_jackfruit",
+        "young_jackfruit"
+      ],
+      "mapping_status": "ambiguous_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Single-word folder does not identify fruit part or maturity. Folder name is not evidence of jackfruit_seed. No forced mapping."
+    },
+    {
+      "folder_name": "Lime",
+      "image_count": 969,
+      "proposed_class_id": "lime",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct match to whole lime class. Verify no lime juice/packaged-only images."
+    },
+    {
+      "folder_name": "Maldive Fish",
+      "image_count": 1413,
+      "proposed_class_id": null,
+      "candidate_class_ids": [],
+      "mapping_status": "unmapped",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Class is absent from both the pilot in-scope and out-of-scope label sets. Do not map under the current schema."
+    },
+    {
+      "folder_name": "Onion",
+      "image_count": 149,
+      "proposed_class_id": "onion",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Generic/large onion class. Red-skinned examples require re-label to red_onion during human review."
+    },
+    {
+      "folder_name": "Pandan Leaf",
+      "image_count": 240,
+      "proposed_class_id": "pandan_leaves",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct name match. Distinguish from curry leaves by long strap-like geometry."
+    },
+    {
+      "folder_name": "Paper Corn",
+      "image_count": 216,
+      "proposed_class_id": null,
+      "candidate_class_ids": [
+        "black_pepper_whole"
+      ],
+      "mapping_status": "ambiguous_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Likely misspelling of Pepper Corn, but name is ambiguous. Do not merge into Black Pepper without visual review."
+    },
+    {
+      "folder_name": "Potato",
+      "image_count": 207,
+      "proposed_class_id": "potato",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct match. Verify no cooked-potato dishes are included for a raw ingredient class."
+    },
+    {
+      "folder_name": "Pumpkin",
+      "image_count": 244,
+      "proposed_class_id": "pumpkin",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct match. Rind vs flesh distinction needs visual QA."
+    },
+    {
+      "folder_name": "Raw Rice",
+      "image_count": 492,
+      "proposed_class_id": null,
+      "candidate_class_ids": [],
+      "mapping_status": "unmapped",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Raw rice is absent from both pilot label sets; cooked_rice is an out-of-scope ID and is NOT a substitute. Do not map."
+    },
+    {
+      "folder_name": "Red Chili",
+      "image_count": 1178,
+      "proposed_class_id": null,
+      "candidate_class_ids": [
+        "dried_red_chilli"
+      ],
+      "mapping_status": "ambiguous_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Fresh vs dried is not encoded in the folder name. Only dried_red_chilli is approved; fresh red chilli has no class."
+    },
+    {
+      "folder_name": "Small Onion",
+      "image_count": 1222,
+      "proposed_class_id": "small_onion",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct match. Keep separate from generic onion and red onion."
+    },
+    {
+      "folder_name": "Sugar",
+      "image_count": 599,
+      "proposed_class_id": null,
+      "candidate_class_ids": [],
+      "mapping_status": "out_of_scope",
+      "out_of_scope_class_id": "sugar",
+      "requires_visual_review": true,
+      "rationale": "Explicitly out-of-scope in the pilot label set; visually confusable with salt without context."
+    },
+    {
+      "folder_name": "Table Salt",
+      "image_count": 77,
+      "proposed_class_id": null,
+      "candidate_class_ids": [],
+      "mapping_status": "out_of_scope",
+      "out_of_scope_class_id": "salt",
+      "requires_visual_review": true,
+      "rationale": "Explicitly out-of-scope in the pilot label set; visually confusable with sugar without context."
+    },
+    {
+      "folder_name": "Tamarind",
+      "image_count": 6733,
+      "proposed_class_id": null,
+      "candidate_class_ids": [
+        "tamarind_pulp",
+        "tamarind_paste"
+      ],
+      "mapping_status": "ambiguous_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Folder name does not resolve processing state; pulp and paste are separate approved classes. No forced mapping."
+    },
+    {
+      "folder_name": "Tender Jack",
+      "image_count": 706,
+      "proposed_class_id": "young_jackfruit",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Tender jack is a Sri Lankan name for young green jackfruit. Maturity state still needs visual confirmation."
+    },
+    {
+      "folder_name": "Tomato",
+      "image_count": 337,
+      "proposed_class_id": "tomato",
+      "candidate_class_ids": [],
+      "mapping_status": "proposed_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Direct name match."
+    },
+    {
+      "folder_name": "Turmeric",
+      "image_count": 365,
+      "proposed_class_id": null,
+      "candidate_class_ids": [
+        "turmeric_powder"
+      ],
+      "mapping_status": "ambiguous_pending_review",
+      "out_of_scope_class_id": null,
+      "requires_visual_review": true,
+      "rationale": "Folder name omits form. Only turmeric_powder is approved and no fresh-root class exists; verify processing state."
+    }
+  ]
+}

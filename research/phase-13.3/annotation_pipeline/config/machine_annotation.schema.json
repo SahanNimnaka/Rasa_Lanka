@@ -1,0 +1,616 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rasalanka.local/schemas/machine_annotation_v1.json",
+  "title": "RasaLanka Machine-Generated Image Annotation Record",
+  "description": "One machine-generated, image-level multi-label annotation candidate. This is NOT the human annotation schema (pilot_annotation_schema.json). Folder names are proposals only, never ground truth. Confidence is null unless an actual model prediction was produced. Human verification is false by default and cannot be asserted without verifier identity and time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "annotation_id",
+    "image_id",
+    "batch_id",
+    "original_folder",
+    "original_filename",
+    "relative_path",
+    "image_sha256",
+    "folder_proposed_class",
+    "folder_mapping_status",
+    "machine_labels",
+    "uncertain_labels",
+    "out_of_scope_labels",
+    "visible_ingredient_count",
+    "multi_ingredient_scene",
+    "quality_flags",
+    "processing_state_evidence",
+    "processing_status",
+    "human_review",
+    "annotation_method",
+    "generator",
+    "processing_notes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "machine-annotation-v1",
+      "description": "Version of this machine-generated record format."
+    },
+    "annotation_id": {
+      "type": "string",
+      "pattern": "^MA-[0-9A-Fa-f]{32}$",
+      "description": "Globally unique machine annotation ID (MA- + 128-bit random hex)."
+    },
+    "image_id": {
+      "type": "string",
+      "pattern": "^IMG-[0-9A-Fa-f]{32}$",
+      "description": "Globally unique image ID (IMG- + 128-bit random hex). Stable across re-annotation."
+    },
+    "batch_id": {
+      "type": "string",
+      "pattern": "^BATCH-[A-Za-z0-9_-]{1,64}$",
+      "description": "Identifier of the processing batch that produced this record."
+    },
+    "original_folder": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Original ingredient folder name; preserved verbatim, never renamed."
+    },
+    "original_filename": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\\\]+$",
+      "description": "Original filename only, with no directory separators."
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path relative to the collected_dataset root, for provenance and lookup."
+    },
+    "image_sha256": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]{64}$",
+      "description": "SHA-256 of the original image bytes; content identity, not provenance rights."
+    },
+    "folder_proposed_class": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/inScopeClassId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Single in-scope class proposed by the folder mapping configuration. Null when the folder is ambiguous, out of scope, or unmapped."
+    },
+    "folder_mapping_status": {
+      "enum": [
+        "approved",
+        "proposed_pending_review",
+        "ambiguous_pending_review",
+        "out_of_scope",
+        "unmapped",
+        "unmapped_pending_research"
+      ],
+      "default": "unmapped",
+      "description": "Status of the folder-to-class proposal; never implies verified label."
+    },
+    "machine_labels": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/inScopeLabel"
+      },
+      "default": [],
+      "description": "In-scope ingredient labels produced by folder proposal or a real model."
+    },
+    "uncertain_labels": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/uncertainLabel"
+      },
+      "default": [],
+      "description": "Candidate in-scope classes that could not be resolved; preserved, not discarded."
+    },
+    "out_of_scope_labels": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/outOfScopeLabel"
+      },
+      "default": [],
+      "description": "Visible but non-target classes; preserved as hard negatives/observations."
+    },
+    "visible_ingredient_count": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Count of visibly distinct ingredient items; may exceed the number of labels."
+    },
+    "multi_ingredient_scene": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when more than one distinct ingredient is visible in the image."
+    },
+    "quality_flags": {
+      "$ref": "#/$defs/qualityFlags",
+      "description": "Automated screening flags; all are heuristic, none prove a visual defect."
+    },
+    "processing_state_evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/processingState"
+      },
+      "uniqueItems": true,
+      "default": [],
+      "description": "Approved processing-state attributes visible in the image; not new classes."
+    },
+    "processing_status": {
+      "enum": [
+        "pending",
+        "screening_complete",
+        "labelled",
+        "needs_review",
+        "ready_for_human_verification",
+        "excluded"
+      ],
+      "default": "pending",
+      "description": "Pipeline processing state of this candidate record."
+    },
+    "human_review": {
+      "$ref": "#/$defs/humanReview",
+      "default": {
+        "human_verified": false,
+        "review_status": "not_reviewed",
+        "verified_by": null,
+        "verification_timestamp": null,
+        "review_notes": ""
+      },
+      "description": "Human verification metadata. Defaults to not verified."
+    },
+    "annotation_method": {
+      "const": "machine_generated",
+      "description": "Fixed discriminator separating this format from human annotation records."
+    },
+    "generator": {
+      "$ref": "#/$defs/generator"
+    },
+    "processing_notes": {
+      "type": "string",
+      "default": "",
+      "description": "Free-text provenance of decisions, warnings and unresolved ambiguity."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "generator": {
+            "properties": {
+              "method": {
+                "const": "folder_proposal"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          }
+        },
+        "required": [
+          "generator"
+        ]
+      },
+      "then": {
+        "properties": {
+          "machine_labels": {
+            "items": {
+              "properties": {
+                "confidence": {
+                  "const": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "generator": {
+            "properties": {
+              "model_id": {
+                "const": null
+              }
+            },
+            "required": [
+              "model_id"
+            ]
+          }
+        },
+        "required": [
+          "generator"
+        ]
+      },
+      "then": {
+        "properties": {
+          "machine_labels": {
+            "items": {
+              "properties": {
+                "confidence": {
+                  "const": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "human_review": {
+            "properties": {
+              "human_verified": {
+                "const": true
+              }
+            },
+            "required": [
+              "human_verified"
+            ]
+          }
+        },
+        "required": [
+          "human_review"
+        ]
+      },
+      "then": {
+        "properties": {
+          "human_review": {
+            "required": [
+              "verified_by",
+              "verification_timestamp",
+              "review_status"
+            ],
+            "properties": {
+              "verified_by": {
+                "type": "string",
+                "minLength": 1
+              },
+              "verification_timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "review_status": {
+                "const": "reviewed"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "multi_ingredient_scene": {
+            "const": false
+          }
+        },
+        "required": [
+          "multi_ingredient_scene"
+        ]
+      },
+      "then": {
+        "properties": {
+          "machine_labels": {
+            "maxItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "inScopeClassId": {
+      "type": "string",
+      "enum": [
+        "black_pepper_whole",
+        "cardamom_pod",
+        "cinnamon_bark",
+        "clove",
+        "dried_red_chilli",
+        "turmeric_powder",
+        "garlic_clove",
+        "ginger_root",
+        "green_chilli",
+        "red_onion",
+        "small_onion",
+        "curry_leaves",
+        "pandan_leaves",
+        "lime",
+        "tamarind_pulp",
+        "fish",
+        "chicken",
+        "brinjal",
+        "potato",
+        "pumpkin",
+        "tomato",
+        "red_lentils",
+        "jackfruit_seed",
+        "mature_jackfruit",
+        "black_mustard_seed",
+        "black_pepper_ground",
+        "chilli_flake",
+        "chilli_powder",
+        "curry_powder",
+        "coriander_seed",
+        "cumin_seed",
+        "fennel_seed",
+        "fenugreek_seed",
+        "mustard_seed",
+        "mustard_powder",
+        "ginger_garlic_paste",
+        "onion",
+        "tamarind_paste",
+        "goraka",
+        "young_jackfruit",
+        "grated_coconut",
+        "coconut_milk",
+        "cooking_oil"
+      ],
+      "description": "Approved in-scope pilot class IDs from approved_taxonomy.json."
+    },
+    "outOfScopeClassId": {
+      "type": "string",
+      "enum": [
+        "white_pepper",
+        "lime_juice",
+        "vinegar",
+        "salt",
+        "sugar",
+        "coconut_oil",
+        "water",
+        "flour",
+        "cheese",
+        "breadcrumbs",
+        "cabbage",
+        "lemon",
+        "other_plant_milk",
+        "other_seed",
+        "other_oil",
+        "other_clear_liquid",
+        "other_dried_fish",
+        "other_paste",
+        "other_powder",
+        "cooked_rice"
+      ],
+      "description": "Approved out-of-scope IDs from approved_taxonomy.json."
+    },
+    "processingState": {
+      "type": "string",
+      "enum": [
+        "whole",
+        "cut",
+        "sliced",
+        "shredded",
+        "grated",
+        "dried",
+        "powder",
+        "paste",
+        "liquid",
+        "cooked",
+        "packaged",
+        "mixed_states",
+        "not_applicable"
+      ],
+      "description": "Approved processing-state values from approved_taxonomy.json."
+    },
+    "confidence": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Model confidence in [0, 1], or null when no model prediction exists. Never invent a value for folder-only proposals."
+    },
+    "inScopeLabel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class_id",
+        "confidence",
+        "status"
+      ],
+      "properties": {
+        "class_id": {
+          "$ref": "#/$defs/inScopeClassId"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "status": {
+          "enum": [
+            "predicted",
+            "folder_proposed",
+            "needs_review"
+          ]
+        }
+      }
+    },
+    "uncertainLabel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class_id",
+        "confidence",
+        "status"
+      ],
+      "properties": {
+        "class_id": {
+          "$ref": "#/$defs/inScopeClassId"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "status": {
+          "const": "uncertain"
+        }
+      }
+    },
+    "outOfScopeLabel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class_id",
+        "confidence",
+        "status"
+      ],
+      "properties": {
+        "class_id": {
+          "$ref": "#/$defs/outOfScopeClassId"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "status": {
+          "const": "out_of_scope"
+        }
+      }
+    },
+    "qualityFlags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "low_resolution",
+        "severe_low_resolution",
+        "blur_suspected",
+        "text_detected",
+        "watermark_suspected",
+        "packaging_dependence_suspected",
+        "tiny_subject",
+        "needs_manual_qa"
+      ],
+      "properties": {
+        "low_resolution": {
+          "type": "boolean",
+          "default": false
+        },
+        "severe_low_resolution": {
+          "type": "boolean",
+          "default": false
+        },
+        "blur_suspected": {
+          "type": "boolean",
+          "default": false
+        },
+        "text_detected": {
+          "type": "boolean",
+          "default": false
+        },
+        "watermark_suspected": {
+          "type": "boolean",
+          "default": false
+        },
+        "packaging_dependence_suspected": {
+          "type": "boolean",
+          "default": false
+        },
+        "tiny_subject": {
+          "type": "boolean",
+          "default": false
+        },
+        "needs_manual_qa": {
+          "type": "boolean",
+          "default": false
+        },
+        "screen_method": {
+          "type": "string",
+          "default": "none",
+          "description": "Name/version of the automated screen, or 'none'."
+        }
+      }
+    },
+    "humanReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "human_verified": {
+          "type": "boolean",
+          "default": false,
+          "description": "Must not be true without verifier identity, timestamp and reviewed status."
+        },
+        "review_status": {
+          "enum": [
+            "not_reviewed",
+            "pending_review",
+            "in_review",
+            "reviewed",
+            "changes_requested"
+          ],
+          "default": "not_reviewed"
+        },
+        "verified_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Real human verifier ID; never fabricated."
+        },
+        "verification_timestamp": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "default": null,
+          "description": "Real verification time; never fabricated."
+        },
+        "review_notes": {
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "pipeline_version"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "folder_proposal",
+            "automated_heuristic",
+            "model_prediction",
+            "hybrid"
+          ],
+          "description": "How labels were produced; folder_proposal forbids non-null confidence."
+        },
+        "pipeline_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Real model identifier, or null when no model was run."
+        },
+        "model_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    }
+  }
+}

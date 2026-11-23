@@ -1,0 +1,312 @@
+{
+  "spec_version": "machine-annotation-format-v1",
+  "title": "RasaLanka Machine-Generated Annotation Format Specification",
+  "purpose": "Defines one JSON record per image as a machine-generated candidate for later human adjudication. The format preserves provenance, uncertainty and out-of-scope observations without asserting verified labels.",
+  "status": "proposal_for_review",
+  "schema_file": "machine_annotation.schema.json",
+  "schema_version_constant": "machine-annotation-v1",
+  "schema_draft": "https://json-schema.org/draft/2020-12/schema",
+  "dependencies": {
+    "python": ">=3.10",
+    "jsonschema": ">=4.18 (validated with 4.26.0 and its transitive packages attrs 26.1.0, jsonschema-specifications 2025.9.1, referencing 0.37.0, rpds-py 2026.9.1)",
+    "note": "jsonschema was installed into the local Python environment with 'python -m pip install jsonschema'. It is the only new direct dependency; it is used by scripts/validate_annotation_schema.py. No application runtime dependency and no requirements/pyproject file were introduced."
+  },
+  "distinction_from_human_schema": {
+    "human_schema_file": "../pilot_annotation_schema.json",
+    "human_schema_version": "pilot-annotation-v1",
+    "human_schema_id_pattern": "^PIL-[0-9]{6}$",
+    "machine_schema_id_pattern": "^IMG-[0-9A-Fa-f]{32}$",
+    "machine_method_constant": "machine_generated",
+    "differences": [
+      "Machine records are candidates, not adjudicated ground truth.",
+      "Machine records have no annotator_id or annotation_timestamp; those are human-only concepts.",
+      "Machine labels are objects carrying class_id, confidence and status; human labels are plain class ID arrays.",
+      "Machine records store source provenance (folder, filename, SHA-256, relative path) for every image.",
+      "Human verification defaults to false and cannot be asserted without evidence.",
+      "The two schema files and their $id values are separate; neither overwrites the other."
+    ]
+  },
+  "record_structure": {
+    "type": "object",
+    "one_record_per_image": true,
+    "fields": {
+      "schema_version": {
+        "type": "const string",
+        "value": "machine-annotation-v1",
+        "required": true,
+        "meaning": "Identifies the record format version."
+      },
+      "annotation_id": {
+        "type": "string ^MA-[0-9A-Fa-f]{32}$",
+        "required": true,
+        "meaning": "Globally unique ID for this annotation record. 128-bit random hex after the MA- prefix."
+      },
+      "image_id": {
+        "type": "string ^IMG-[0-9A-Fa-f]{32}$",
+        "required": true,
+        "meaning": "Globally unique, stable image ID. Independent of folder, filename and hash so re-annotation keeps identity."
+      },
+      "batch_id": {
+        "type": "string ^BATCH-[A-Za-z0-9_-]{1,64}$",
+        "required": true,
+        "meaning": "Processing batch that produced the record, for traceability and rollback."
+      },
+      "original_folder": {
+        "type": "non-empty string",
+        "required": true,
+        "meaning": "Ingredient folder name copied verbatim. Never renamed or normalised in place."
+      },
+      "original_filename": {
+        "type": "non-empty string with no path separators",
+        "required": true,
+        "meaning": "Original filename only. Preserves the source identifier."
+      },
+      "relative_path": {
+        "type": "non-empty string",
+        "required": true,
+        "meaning": "Path relative to collected_dataset root; enables re-reading the exact source image."
+      },
+      "image_sha256": {
+        "type": "64 hex characters",
+        "required": true,
+        "meaning": "SHA-256 of original image bytes. Content identity for deduplication, not proof of licence or ownership."
+      },
+      "folder_proposed_class": {
+        "type": "approved in-scope class ID or null",
+        "required": true,
+        "default": null,
+        "meaning": "Single candidate from folder_class_mapping.json. Null whenever the folder is ambiguous, out of scope or unmapped."
+      },
+      "folder_mapping_status": {
+        "type": "enum",
+        "required": true,
+        "default": "unmapped",
+        "values": [
+          "approved",
+          "proposed_pending_review",
+          "ambiguous_pending_review",
+          "out_of_scope",
+          "unmapped",
+          "unmapped_pending_research"
+        ],
+        "meaning": "Confidence class of the folder proposal. No value makes a folder name ground truth."
+      },
+      "machine_labels": {
+        "type": "array of label objects",
+        "required": true,
+        "default": [],
+        "meaning": "In-scope ingredient labels with class_id, confidence and status. Multiple labels are permitted."
+      },
+      "uncertain_labels": {
+        "type": "array of label objects",
+        "required": true,
+        "default": [],
+        "meaning": "Candidate in-scope classes that could not be resolved. Preserved for human review rather than dropped."
+      },
+      "out_of_scope_labels": {
+        "type": "array of label objects",
+        "required": true,
+        "default": [],
+        "meaning": "Visible but non-target classes from the approved out-of-scope list, retained as observations/hard negatives."
+      },
+      "visible_ingredient_count": {
+        "type": "integer >= 0",
+        "required": true,
+        "default": 0,
+        "meaning": "Count of visibly distinct ingredient items; can be greater than the number of resolved labels."
+      },
+      "multi_ingredient_scene": {
+        "type": "boolean",
+        "required": true,
+        "default": false,
+        "meaning": "True when more than one distinct ingredient is visible. Must be true if machine_labels has more than one entry."
+      },
+      "quality_flags": {
+        "type": "object of booleans plus screen_method",
+        "required": true,
+        "meaning": "Automated screening results only. Every flag is heuristic and needs human confirmation before acting on it."
+      },
+      "processing_state_evidence": {
+        "type": "array of approved processing-state values",
+        "required": true,
+        "default": [],
+        "meaning": "Visible processing attributes such as dried, powder or paste. These are attributes, not new ingredient classes."
+      },
+      "processing_status": {
+        "type": "enum",
+        "required": true,
+        "default": "pending",
+        "values": [
+          "pending",
+          "screening_complete",
+          "labelled",
+          "needs_review",
+          "ready_for_human_verification",
+          "excluded"
+        ],
+        "meaning": "Where the candidate is in the machine pipeline."
+      },
+      "human_review": {
+        "type": "object",
+        "required": true,
+        "default": {
+          "human_verified": false,
+          "review_status": "not_reviewed",
+          "verified_by": null,
+          "verification_timestamp": null,
+          "review_notes": ""
+        },
+        "meaning": "Human verification metadata. Absent evidence means not verified."
+      },
+      "annotation_method": {
+        "type": "const string",
+        "value": "machine_generated",
+        "required": true,
+        "meaning": "Fixed discriminator that prevents confusion with human annotation records."
+      },
+      "generator": {
+        "type": "object",
+        "required": true,
+        "meaning": "How the labels were produced: folder_proposal, automated_heuristic, model_prediction or hybrid, plus real model identifiers."
+      },
+      "processing_notes": {
+        "type": "string",
+        "required": true,
+        "default": "",
+        "meaning": "Free text explaining decisions, warnings and unresolved ambiguity."
+      }
+    },
+    "label_object": {
+      "description": "All three label arrays use objects with the same three required keys.",
+      "fields": {
+        "class_id": {
+          "type": "approved class ID",
+          "meaning": "In-scope ID for machine_labels and uncertain_labels; out-of-scope ID for out_of_scope_labels."
+        },
+        "confidence": {
+          "type": "number in [0, 1] or null",
+          "default": null,
+          "meaning": "Real model confidence only. Null is mandatory when no model prediction exists; never fabricate a value."
+        },
+        "status": {
+          "type": "enum",
+          "meaning": "predicted | folder_proposed | needs_review for machine_labels; uncertain for uncertain_labels; out_of_scope for out_of_scope_labels."
+        }
+      }
+    },
+    "human_review_object": {
+      "fields": {
+        "human_verified": {
+          "type": "boolean",
+          "default": false,
+          "meaning": "True only after a real human review, with verifier ID and timestamp recorded."
+        },
+        "review_status": {
+          "type": "enum",
+          "default": "not_reviewed",
+          "values": [
+            "not_reviewed",
+            "pending_review",
+            "in_review",
+            "reviewed",
+            "changes_requested"
+          ]
+        },
+        "verified_by": {
+          "type": "string or null",
+          "default": null,
+          "meaning": "Real verifier identity. Never fabricated or inferred."
+        },
+        "verification_timestamp": {
+          "type": "RFC 3339 date-time string or null",
+          "default": null,
+          "meaning": "Real review time. Never fabricated or inferred."
+        },
+        "review_notes": {
+          "type": "string",
+          "default": ""
+        }
+      }
+    }
+  },
+  "validation_rules": [
+    "The JSON Schema itself must be a valid Draft 2020-12 schema.",
+    "Every permitted class ID in the schema must exactly match approved_taxonomy.json; no IDs are invented.",
+    "annotation_method must equal machine_generated.",
+    "human_review.human_verified defaults to false.",
+    "human_verified = true requires verified_by, verification_timestamp and review_status = reviewed.",
+    "confidence is either a number in [0,1] or null; null is valid and is the default.",
+    "If generator.method is folder_proposal, every machine_labels confidence must be null.",
+    "If generator.model_id is null, every machine_labels confidence must be null.",
+    "machine_labels and uncertain_labels may only use in-scope class IDs.",
+    "out_of_scope_labels may only use approved out-of-scope IDs.",
+    "multi_ingredient_scene = false implies at most one machine label.",
+    "No folder name is accepted as ground truth; all non-approved mappings require human review."
+  ],
+  "folder_mapping": {
+    "file": "folder_class_mapping.json",
+    "covers_all_current_folders": true,
+    "rule": "Mappings are proposals. proposed_class_id is null for ambiguous, out-of-scope and unmapped folders. Never force an uncertain mapping into a class."
+  },
+  "example_valid_record": {
+    "schema_version": "machine-annotation-v1",
+    "annotation_id": "MA-0123456789abcdef0123456789abcdef",
+    "image_id": "IMG-fedcba9876543210fedcba9876543210",
+    "batch_id": "BATCH-2026-11-24-001",
+    "original_folder": "Cardamom",
+    "original_filename": "cardamom_001_jpg.rf.0123456789abcdef0123456789abcdef.jpg",
+    "relative_path": "Cardamom/cardamom_001_jpg.rf.0123456789abcdef0123456789abcdef.jpg",
+    "image_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "folder_proposed_class": "cardamom_pod",
+    "folder_mapping_status": "proposed_pending_review",
+    "machine_labels": [
+      {
+        "class_id": "cardamom_pod",
+        "confidence": null,
+        "status": "folder_proposed"
+      }
+    ],
+    "uncertain_labels": [],
+    "out_of_scope_labels": [],
+    "visible_ingredient_count": 1,
+    "multi_ingredient_scene": false,
+    "quality_flags": {
+      "low_resolution": false,
+      "severe_low_resolution": false,
+      "blur_suspected": false,
+      "text_detected": false,
+      "watermark_suspected": false,
+      "packaging_dependence_suspected": false,
+      "tiny_subject": false,
+      "needs_manual_qa": false,
+      "screen_method": "none"
+    },
+    "processing_state_evidence": [
+      "whole"
+    ],
+    "processing_status": "labelled",
+    "human_review": {
+      "human_verified": false,
+      "review_status": "not_reviewed",
+      "verified_by": null,
+      "verification_timestamp": null,
+      "review_notes": ""
+    },
+    "annotation_method": "machine_generated",
+    "generator": {
+      "method": "folder_proposal",
+      "pipeline_version": "step5-draft-1",
+      "model_id": null,
+      "model_version": null
+    },
+    "processing_notes": "Folder-based proposal only; no model prediction has been run."
+  },
+  "prohibited_practices": [
+    "Copying a folder name directly into a verified/human label.",
+    "Assigning confidence without an actual model output.",
+    "Creating a new class ID or silently merging two classes.",
+    "Filling in annotator IDs or review timestamps before a human review.",
+    "Overwriting pilot_annotation_schema.json or approved_taxonomy.json.",
+    "Generating annotations for the full image set before this format is approved."
+  ]
+}
