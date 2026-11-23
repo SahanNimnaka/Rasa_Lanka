@@ -1,0 +1,87 @@
+{
+  "config_version": "quality-assessment-v1",
+  "schema_version": "machine-annotation-v1",
+  "policy": {
+    "screening_only": true,
+    "no_images_deleted_or_modified": true,
+    "folder_names_are_not_ground_truth": true,
+    "no_ingredient_classification": true,
+    "below_224px_is_a_flag_not_a_rejection": true,
+    "ocr_claimed": false,
+    "watermark_model_claimed": false,
+    "object_detection_claimed": false
+  },
+  "resolution": {
+    "very_low_min_side": 128,
+    "low_min_side": 224,
+    "unusually_small_pixels": 4096,
+    "unusually_large_pixels": 12000000
+  },
+  "blur": {
+    "method": "variance_of_laplacian",
+    "kernel": 3,
+    "severe_max": 30.0,
+    "probable_max": 100.0,
+    "possible_max": 300.0,
+    "categories": {
+      "severe": "variance < severe_max: strong blur indication, manual review required",
+      "probable": "severe_max <= variance < probable_max: likely blur, manual review required",
+      "possible": "probable_max <= variance < possible_max: mild blur indication, review if other flags present",
+      "clear": "variance >= possible_max: no blur indication from this heuristic alone",
+      "unavailable": "blur could not be computed"
+    },
+    "note": "Thresholds are screening heuristics only. Small ingredient images and smooth backgrounds naturally produce low variance, so a single universal threshold must not be treated as ground truth."
+  },
+  "compression": {
+    "highly_compressed_bytes_per_pixel": 0.08,
+    "note": "file_size_bytes / (width * height); a low value is a screening hint for heavy JPEG compression, not proof."
+  },
+  "visual_suitability": {
+    "canny_low": 100,
+    "canny_high": 200,
+    "edge_density_high": 0.18,
+    "edge_density_low": 0.01,
+    "saturation_low": 25.0,
+    "corner_contrast_high": 45.0,
+    "algorithms": {
+      "text_heavy_candidate": "High Canny edge density with many horizontally aligned edge rows; no OCR was performed.",
+      "packaging_candidate": "High edge density combined with low mean HSV saturation, consistent with printed packaging; no packaging model was used.",
+      "possible_watermark": "High local contrast confined to image corners while overall edge density is low; no watermark model was used.",
+      "no_clear_subject_candidate": "Very low edge density and very low saturation, consistent with a blank or near-uniform frame."
+    }
+  },
+  "integrity": {
+    "expected_modes": ["1", "L", "LA", "P", "RGB", "RGBA", "CMYK", "I", "F"]
+  },
+  "duplicate_detection": {
+    "phash_size": 32,
+    "phash_hash_bits": 8,
+    "dhash_width": 9,
+    "dhash_height": 8,
+    "phash_max_hamming": 10,
+    "dhash_max_hamming": 10,
+    "lsh_bands": 4,
+    "lsh_small_bands": 8,
+    "max_bucket_size": 400,
+    "min_similarity": 0.84,
+    "note": "pHash and dHash are perceptual similarity estimates. Candidate groups require human review and must not be automatically merged."
+  },
+  "flags": {
+    "low_resolution": "Minimum side is below low_min_side; screening only, not automatic rejection.",
+    "very_low_resolution": "Minimum side is below very_low_min_side; likely unsuitable for training without careful review.",
+    "unusually_small_dimensions": "Total pixels are below unusually_small_pixels.",
+    "unusually_large_dimensions": "Total pixels exceed unusually_large_pixels; may need resizing strategy review.",
+    "possible_blur": "Laplacian variance falls in probable/possible blur ranges.",
+    "severe_blur": "Laplacian variance falls in the severe blur range.",
+    "highly_compressed": "Bytes-per-pixel is below the configured threshold.",
+    "unexpected_mode": "Decoded image mode is not in the expected_modes list.",
+    "invalid_dimensions": "Decoded width or height is non-positive or disagrees with the Step 6 inventory.",
+    "corrupted_image": "The file could not be decoded or Pillow verify() failed; may be truncated.",
+    "missing_source_file": "The path recorded in the Step 6 inventory no longer exists.",
+    "text_heavy_candidate": "Edge-pattern heuristic suggests text-heavy content; no OCR performed.",
+    "packaging_candidate": "Edge/colour heuristic suggests printed packaging; no packaging model used.",
+    "possible_watermark": "Corner-contrast heuristic suggests an overlay; no watermark model used.",
+    "no_clear_subject_candidate": "Low edge and colour variation suggest no clearly visible ingredient.",
+    "manual_visual_review_required": "At least one screening flag was raised; a human must inspect the image before use."
+  }
+}
