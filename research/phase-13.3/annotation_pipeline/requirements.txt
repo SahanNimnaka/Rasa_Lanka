@@ -1,0 +1,8 @@
+# RasaLanka dataset annotation pipeline (research only)
+# Python 3.10+
+
+# Step 6: image metadata extraction (already available in the local environment)
+Pillow>=10.0
+
+# Step 5: JSON Schema validation of machine annotation records
+jsonschema>=4.18
