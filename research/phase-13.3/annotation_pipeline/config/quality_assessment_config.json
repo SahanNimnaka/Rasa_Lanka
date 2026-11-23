@@ -63,8 +63,9 @@
     "lsh_bands": 4,
     "lsh_small_bands": 8,
     "max_bucket_size": 400,
-    "min_similarity": 0.84,
-    "note": "pHash and dHash are perceptual similarity estimates. Candidate groups require human review and must not be automatically merged."
+    "hash_bit_length": 64,
+    "comparison_rule": "A pair is a perceptual candidate when phash_hamming <= phash_max_hamming OR dhash_hamming <= dhash_max_hamming. Similarity (1 - hamming/64) is reported for interpretation only, not used as a second threshold.",
+    "note": "Hamming distance is the primary and unambiguous threshold. pHash and dHash are perceptual similarity estimates. All candidates require human review and must not be automatically merged. Strict groups use complete-link grouping: every member pair must satisfy the comparison rule."
   },
   "flags": {
     "low_resolution": "Minimum side is below low_min_side; screening only, not automatic rejection.",
