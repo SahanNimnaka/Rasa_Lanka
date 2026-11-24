@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\B1RuntimeHealthController;
+use App\Http\Controllers\Api\V1\B1ValidationController;
 use App\Http\Controllers\Api\V1\Controller as ApiController;
 use App\Http\Controllers\Api\V1\IngredientCategoryController;
 use App\Http\Controllers\Api\V1\IngredientController;
@@ -65,6 +67,14 @@ Route::prefix('v1')->as('v1.')->group(function () {
             ->name('recipe-history.store');
         Route::delete('/recipe-history', [RecipeHistoryController::class, 'destroy'])
             ->name('recipe-history.destroy');
+
+        Route::prefix('annotations')->as('annotations.')->group(function () {
+            Route::post('/validate', [B1ValidationController::class, 'validate'])
+                ->middleware('can:annotation.validate')
+                ->name('validate');
+            Route::get('/runtime-health', [B1RuntimeHealthController::class, 'show'])
+                ->name('runtime-health');
+        });
     });
 });
 

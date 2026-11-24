@@ -22,6 +22,18 @@ class User extends Authenticatable
 
     protected $keyType = 'int';
 
+    public const ROLE_ANNOTATOR = 'annotator';
+
+    public const ROLE_REVIEWER = 'reviewer';
+
+    public const ROLE_RESEARCH_ADMIN = 'research_admin';
+
+    public const ANNOTATION_ROLES = [
+        self::ROLE_ANNOTATOR,
+        self::ROLE_REVIEWER,
+        self::ROLE_RESEARCH_ADMIN,
+    ];
+
     /**
      * The attributes that are mass assignable.
      *
@@ -31,6 +43,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        // role intentionally omitted from mass assignment; assign via explicit admin process.
     ];
 
     /**
@@ -53,7 +66,28 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'role' => 'string',
         ];
+    }
+
+    public function hasAnnotationRole(): bool
+    {
+        return in_array($this->role, self::ANNOTATION_ROLES, true);
+    }
+
+    public function hasAnyAnnotationRole(array $roles): bool
+    {
+        return $this->hasAnnotationRole() && in_array($this->role, $roles, true);
+    }
+
+    public function isResearchAdmin(): bool
+    {
+        return $this->role === self::ROLE_RESEARCH_ADMIN;
+    }
+
+    public function isReviewer(): bool
+    {
+        return $this->hasAnyAnnotationRole([self::ROLE_REVIEWER, self::ROLE_RESEARCH_ADMIN]);
     }
 
     public function savedRecipes(): HasMany
