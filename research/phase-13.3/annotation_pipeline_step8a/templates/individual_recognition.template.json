@@ -1,0 +1,24 @@
+{
+  "schema_version": "human-recognition-v1",
+  "record_id": "HR-IND-000001",
+  "recognition_method": "individual",
+  "verification_status": "pending_confirmation",
+  "ingredient_labels": [],
+  "uncertain_labels": [],
+  "out_of_scope_labels": [],
+  "reviewer_id": null,
+  "recognition_date": null,
+  "notes": "TEMPLATE ONLY. Do not fill with assumed values. Record only evidence confirmed by a human.",
+  "provenance": {
+    "source_type": "historical_individual_inspection",
+    "source_reference": "<fill: document/email/session reference>",
+    "evidence_summary": "<fill: what evidence proves this specific image was individually inspected?>",
+    "is_human_ground_truth": false
+  },
+  "individual": {
+    "image_id": "IMG-000001",
+    "relative_path": "<fill from master inventory>",
+    "original_folder": "<fill from master inventory>",
+    "original_filename": "<fill from master inventory>"
+  }
+}

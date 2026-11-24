@@ -1,0 +1,36 @@
+﻿item,record_count,blank_verified_ingredients,blank_result,blank_status,duplicate_folder_filename_keys,notes
+Black Pepper,620,620,620,620,0,These earlier CSVs still have blank verification fields.
+Cardamom,615,615,615,615,0,These earlier CSVs still have blank verification fields.
+Chiken,56,0,0,0,0,
+Chile Flakes,27,0,0,0,0,CSV has 27 rows; inventory summary previously reported 25 images with last sequence 00027. Reconcile exact filenames.
+Cinnamon,402,0,0,0,0,
+Cloves,303,0,0,0,0,
+Coconut milk,11,0,0,0,0,
+Coconut oil,18,0,0,0,0,
+Coriander,796,0,0,0,0,
+Curry Leavf,114,0,0,0,0,
+dhal,23,0,0,0,0,
+Egg Plant,1017,0,0,0,0,
+Fish,3000,0,0,0,0,
+Gralic,599,0,0,0,0,
+Ginger,178,0,0,0,0,
+Grated coconut,22,0,0,0,0,
+Green Chili,49,0,0,0,0,
+Jack,430,0,0,0,0,
+Lime,969,0,0,0,0,
+Maldive Fish,1413,0,0,0,0,
+Onion,149,0,0,0,0,
+Pandan Leaf,240,0,0,0,0,
+Paper Corn,216,0,0,0,0,
+Potato,210,0,0,0,0,CSV has 210 rows per user's updated count; earlier inventory summary reported 207.
+Pumpkin,244,0,0,0,0,
+Raw Rice,492,0,0,0,0,
+Red Chili,1178,0,0,0,0,
+Small Onion,1222,0,0,0,0,
+Sugar,599,0,0,0,0,
+Table Salt,77,0,0,0,0,
+Tamarind,6733,0,0,0,0,
+Tender Jack,706,0,0,0,0,
+Tomato,337,0,0,0,0,
+Turmeric,365,0,0,0,0,
+MISSING INGREDIENT CSV,0,,,,,Chili Powder CSV not present; inventory summary reported 931 images.

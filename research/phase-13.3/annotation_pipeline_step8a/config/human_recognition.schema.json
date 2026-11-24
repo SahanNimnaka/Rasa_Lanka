@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rasalanka.local/schemas/human_recognition_record_v1.json",
+  "title": "RasaLanka Human Recognition Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_id",
+    "recognition_method",
+    "verification_status",
+    "ingredient_labels",
+    "uncertain_labels",
+    "out_of_scope_labels",
+    "reviewer_id",
+    "recognition_date",
+    "notes",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "human-recognition-v1"
+    },
+    "record_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recognition_method": {
+      "enum": [
+        "individual",
+        "group"
+      ]
+    },
+    "verification_status": {
+      "enum": [
+        "confirmed",
+        "pending_confirmation",
+        "uncertain",
+        "rejected",
+        "not_inspected"
+      ]
+    },
+    "ingredient_labels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "uncertain_labels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "out_of_scope_labels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "reviewer_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "recognition_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO 8601 date or datetime if known; null when unknown. Never fabricated."
+    },
+    "notes": {
+      "type": "string"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_type",
+        "source_reference",
+        "evidence_summary",
+        "is_human_ground_truth"
+      ],
+      "properties": {
+        "source_type": {
+          "enum": [
+            "historical_individual_inspection",
+            "historical_group_inspection",
+            "folder_confirmation_report",
+            "unknown"
+          ]
+        },
+        "source_reference": {
+          "type": "string"
+        },
+        "evidence_summary": {
+          "type": "string"
+        },
+        "is_human_ground_truth": {
+          "type": "boolean"
+        }
+      }
+    },
+    "individual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image_id",
+        "relative_path",
+        "original_folder",
+        "original_filename"
+      ],
+      "properties": {
+        "image_id": {
+          "type": "string",
+          "pattern": "^IMG-[0-9]{6}$"
+        },
+        "relative_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "original_folder": {
+          "type": "string",
+          "minLength": 1
+        },
+        "original_filename": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "group_id",
+        "original_folder",
+        "proposed_ingredient",
+        "image_ids",
+        "image_count"
+      ],
+      "properties": {
+        "group_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "original_folder": {
+          "type": "string",
+          "minLength": 1
+        },
+        "proposed_ingredient": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^IMG-[0-9]{6}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "image_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "recognition_method": {
+            "const": "individual"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "individual"
+        ],
+        "not": {
+          "required": [
+            "group"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "recognition_method": {
+            "const": "group"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "group"
+        ],
+        "not": {
+          "required": [
+            "individual"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verification_status": {
+            "const": "confirmed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "is_human_ground_truth": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+RasaLanka Human Verification Consolidation Report
+
+Ingredient CSV files found: 34 / 35
+Total records consolidated: 23430
+Unique (folder, filename) pairs: 23430
+Duplicate folder+filename keys: 0
+Rows with blank Verified ingredients: 1235
+Rows with blank Result: 1235
+Rows with blank Status: 1235
+Result values: {'': 1235, 'correct': 22195}
+Status values: {'': 1235, 'reviewed': 22195}
+
+Issues requiring attention:
+- Chili Powder CSV is missing (inventory summary reported 931 images).
+- Black Pepper and Cardamom CSVs contain blank Verified ingredients, Result, and Status fields.
+- Chile Flakes CSV contains 27 rows; earlier inventory summary reported 25 images, although the last sequence number was 00027. Confirm exact source filenames.
+- Potato CSV contains 210 rows based on the user's updated count; earlier inventory summary reported 207.
+- This report checks CSV structure and consistency only. It does not independently inspect or verify image contents.
+
+Per-file record counts:
+- black_pepper_human_verification.csv: 620
+- cardamom_human_verification.csv: 615
+- chicken_human_verification.csv: 56
+- chile_flakes_human_verification.csv: 27
+- cinnamon_human_verification.csv: 402
+- cloves_human_verification.csv: 303
+- coconut_milk_human_verification.csv: 11
+- coconut_oil_human_verification.csv: 18
+- coriander_human_verification.csv: 796
+- curry_leaf_human_verification.csv: 114
+- dhal_human_verification.csv: 23
+- egg_plant_human_verification.csv: 1017
+- fish_human_verification.csv: 3000
+- garlic_human_verification.csv: 599
+- ginger_human_verification.csv: 178
+- grated_coconut_human_verification.csv: 22
+- green_chili_human_verification.csv: 49
+- jack_human_verification.csv: 430
+- lime_human_verification.csv: 969
+- maldive_fish_human_verification.csv: 1413
+- onion_human_verification.csv: 149
+- pandan_leaf_human_verification.csv: 240
+- pepper_corn_human_verification.csv: 216
+- potato_human_verification.csv: 210
+- pumpkin_human_verification.csv: 244
+- raw_rice_human_verification.csv: 492
+- red_chili_human_verification.csv: 1178
+- small_onion_human_verification.csv: 1222
+- sugar_human_verification.csv: 599
+- table_salt_human_verification.csv: 77
+- tamarind_human_verification.csv: 6733
+- tender_jack_human_verification.csv: 706
+- tomato_human_verification.csv: 337
+- turmeric_human_verification.csv: 365

@@ -1,0 +1,27 @@
+{
+  "schema_version": "human-recognition-v1",
+  "record_id": "HR-GRP-000001",
+  "recognition_method": "group",
+  "verification_status": "pending_confirmation",
+  "ingredient_labels": [],
+  "uncertain_labels": [],
+  "out_of_scope_labels": [],
+  "reviewer_id": null,
+  "recognition_date": null,
+  "notes": "TEMPLATE ONLY. Group-level recognition must not be converted into individually verified image labels without image-level evidence.",
+  "provenance": {
+    "source_type": "historical_group_inspection",
+    "source_reference": "<fill: session/folder review reference>",
+    "evidence_summary": "<fill: what evidence proves this folder/group was inspected as a group?>",
+    "is_human_ground_truth": false
+  },
+  "group": {
+    "group_id": "GRP-<folder-slug>",
+    "original_folder": "<folder name>",
+    "proposed_ingredient": null,
+    "image_ids": [
+      "IMG-000001"
+    ],
+    "image_count": 1
+  }
+}

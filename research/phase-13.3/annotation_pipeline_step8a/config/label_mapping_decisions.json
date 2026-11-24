@@ -1,0 +1,71 @@
+{
+  "version": "step8a-label-mapping-decisions-v1",
+  "generated_at": "2026-11-24T16:57:44.281622+00:00",
+  "scope": "Step 8A human_verification_master.csv display-label to canonical taxonomy mapping decisions",
+  "policy": {
+    "preserve_master_csv_labels": true,
+    "no_silent_label_rewrite": true,
+    "no_taxonomy_change_without_justification": true,
+    "no_dataset_image_modification": true
+  },
+  "decisions": [
+    {
+      "folder_name": "Curry Leavf",
+      "observed_label": "Curry Leaf",
+      "affected_records": 114,
+      "canonical_class_id": "curry_leaves",
+      "decision_type": "approved_alias",
+      "alias_approved": true,
+      "preserve_original_label": true,
+      "canonical_mapping_pending": false,
+      "taxonomy_change_required": false,
+      "rationale": "Human verification uses display name 'Curry Leaf'; approved taxonomy canonical ID is 'curry_leaves'. This is a display-name/canonical-ID alias. Folder name typo ('Curry Leavf') is already documented in folder_class_mapping.json.",
+      "evidence": [
+        "research/phase-13.3/annotation_pipeline/config/approved_taxonomy.json contains in-scope class 'curry_leaves'",
+        "research/phase-13.3/annotation_pipeline/config/folder_class_mapping.json proposes 'curry_leaves' for folder 'Curry Leavf' (proposed_pending_review)",
+        "human_verification_master.csv has 114 reviewed records with Expected/Verified='Curry Leaf'"
+      ]
+    },
+    {
+      "folder_name": "Gralic",
+      "observed_label": "Garlic",
+      "affected_records": 599,
+      "canonical_class_id": null,
+      "candidate_canonical_class_ids": [
+        "garlic_clove"
+      ],
+      "decision_type": "pending_canonical_mapping",
+      "alias_approved": false,
+      "preserve_original_label": true,
+      "canonical_mapping_pending": true,
+      "taxonomy_change_required": false,
+      "rationale": "Preserve existing 'Garlic' label. Do not automatically map to 'garlic_clove' because the display label does not establish exact garlic form (clove/bulb vs processed/paste). Canonical mapping remains pending visual/provenance confirmation.",
+      "evidence": [
+        "research/phase-13.3/annotation_pipeline/config/approved_taxonomy.json contains 'garlic_clove' but no generic 'garlic'",
+        "research/phase-13.3/annotation_pipeline/config/folder_class_mapping.json proposes 'garlic_clove' for folder 'Gralic' with rationale to confirm cloves/bulbs rather than paste",
+        "human_verification_master.csv has 599 reviewed records with Expected/Verified='Garlic'"
+      ]
+    },
+    {
+      "folder_name": "Paper Corn",
+      "observed_label": "Pepper Corn",
+      "affected_records": 216,
+      "canonical_class_id": null,
+      "candidate_canonical_class_ids": [
+        "black_pepper_whole",
+        "black_pepper_ground"
+      ],
+      "decision_type": "pending_canonical_mapping",
+      "alias_approved": false,
+      "preserve_original_label": true,
+      "canonical_mapping_pending": true,
+      "taxonomy_change_required": false,
+      "rationale": "Preserve existing 'Pepper Corn' label. Do not split into whole or ground pepper and do not force a canonical taxonomy mapping. Folder mapping is ambiguous_pending_review; manual review required before any canonical assignment.",
+      "evidence": [
+        "research/phase-13.3/annotation_pipeline/config/approved_taxonomy.json contains 'black_pepper_whole' and 'black_pepper_ground' but no generic peppercorn class",
+        "research/phase-13.3/annotation_pipeline/config/folder_class_mapping.json marks 'Paper Corn' ambiguous_pending_review with candidate ['black_pepper_whole'] and requires visual review",
+        "human_verification_master.csv has 216 reviewed records with Expected/Verified='Pepper Corn'"
+      ]
+    }
+  ]
+}
