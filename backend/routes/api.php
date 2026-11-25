@@ -10,6 +10,11 @@ use App\Http\Controllers\Api\V1\RecipeCategoryController;
 use App\Http\Controllers\Api\V1\RecipeController;
 use App\Http\Controllers\Api\V1\RecipeHistoryController;
 use App\Http\Controllers\Api\V1\SavedRecipeController;
+use App\Http\Controllers\Api\V1\AnnotationRegistries\ImageIdLookupController;
+use App\Http\Controllers\Api\V1\AnnotationRegistries\ImageInventoryController;
+use App\Http\Controllers\Api\V1\AnnotationRegistries\LabelMappingDecisionController;
+use App\Http\Controllers\Api\V1\AnnotationRegistries\RegistrySummaryController;
+use App\Http\Controllers\Api\V1\AnnotationRegistries\TaxonomyController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->as('v1.')->group(function () {
@@ -74,6 +79,14 @@ Route::prefix('v1')->as('v1.')->group(function () {
                 ->name('validate');
             Route::get('/runtime-health', [B1RuntimeHealthController::class, 'show'])
                 ->name('runtime-health');
+        });
+
+        Route::middleware('can:annotation.access')->prefix('annotation-registries')->as('annotation-registries.')->group(function () {
+            Route::get('/taxonomy', [TaxonomyController::class, 'show'])->name('taxonomy');
+            Route::get('/label-mapping-decisions', [LabelMappingDecisionController::class, 'index'])->name('label-mapping-decisions');
+            Route::get('/image-inventory', [ImageInventoryController::class, 'index'])->name('image-inventory');
+            Route::get('/image-id-lookup', [ImageIdLookupController::class, 'show'])->name('image-id-lookup');
+            Route::get('/summary', [RegistrySummaryController::class, 'show'])->name('summary');
         });
     });
 });
