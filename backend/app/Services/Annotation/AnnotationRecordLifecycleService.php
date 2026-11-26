@@ -337,6 +337,53 @@ class AnnotationRecordLifecycleService
         }
     }
 
+    private function assertCanSubmitDraft(AnnotationRecord $record, User $actor, int $expectedLockVersion): void
+    {
+        $isOwner = (int) $record->created_by_user_id === (int) $actor->id;
+        $canSubmitByRole = $actor->hasAnnotationRole();
+        if (! $isOwner || ! $canSubmitByRole) {
+            throw new AnnotationLifecycleAuthorizationException('Only the draft owner with an authorized annotation role may submit this draft.');
+        }
+
+        if ($expectedLockVersion < 1 || (int) $record->lock_version !== $expectedLockVersion) {
+            throw new AnnotationLifecycleConflictException('Stale lock_version; reload the record and retry.');
+        }
+
+        $state = (string) $record->submission_state;
+        if (in_array($state, ['staging_written', 'b1_completed', 'promotion_pending'], true)) {
+            throw new AnnotationLifecycleConflictException('A submission intent is already in progress for this draft.');
+        }
+
+        $this->assertDraftMutable($record, $expectedLockVersion);
+
+        if (! in_array($state, ['none', 'b1_infra_failed'], true)) {
+            throw new AnnotationLifecycleConflictException('Draft submission is not allowed from the current submission state.');
+        }
+        if ($record->submitted_json_path !== null || $record->submitted_artifact_sha256 !== null || $record->submission_finalized_at !== null) {
+            throw new AnnotationLifecycleConflictException('Finalized records cannot be submitted.');
+        }
+    }
+
+    private function requireCurrentDraftVersionId(AnnotationRecord $record): string
+    {
+        $versionId = $record->current_draft_version_id;
+        $path = $record->current_draft_path;
+        $sha = $record->current_draft_sha256;
+        if (! is_string($versionId) || trim($versionId) === '' || ! is_string($path) || trim($path) === '' || ! is_string($sha) || trim($sha) === '') {
+            throw new AnnotationLifecycleValidationException('Draft content is missing or invalid for submission.');
+        }
+
+        return $this->normalizeIdentifier($versionId, 'current_draft_version_id');
+    }
+
+    private function assertCurrentDraftVersionUnchanged(AnnotationRecord $record, string $expectedDraftVersionId): void
+    {
+        $current = $this->requireCurrentDraftVersionId($record);
+        if ($current !== $expectedDraftVersionId) {
+            throw new AnnotationLifecycleConflictException('Draft changed since candidate submission was prepared; reload and retry.');
+        }
+    }
+
     private function assertWorkflowVerificationAllowed(string $workflowStatus, string $verificationStatus): void
     {
         $allowed = [
@@ -382,9 +429,106 @@ class AnnotationRecordLifecycleService
         return $value;
     }
 
+    private function generateSubmissionIntentId(): string
+    {
+        return 'si-'.Str::lower((string) Str::uuid());
+    }
+
     private function generateRecordId(): string
     {
         return 'ar-'.Str::lower((string) Str::uuid());
+    }
+
+    /**
+     * Create a durable submission intent and exact staged candidate artifact (S2-I6-C1, §6.3 steps 1-5).
+     *
+     * B1 execution, OD-01 lifecycle integration, promotion, and finalization are intentionally out of scope.
+     *
+     * @return array{record:AnnotationRecord,submission_intent_id:string,staging:array{record_id:string,submission_intent_id:string,relative_path:string,sha256:string,bytes:int,idempotent:bool},candidate_sha256:string}
+     */
+    public function createSubmissionIntent(AnnotationRecord $record, User $actor, int $expectedLockVersion): array
+    {
+        $this->requireAnnotationRole($actor);
+        $this->assertSupportedDriver();
+
+        $locked = $this->lockRecord($record->id);
+        $this->assertCanSubmitDraft($locked, $actor, $expectedLockVersion);
+        $currentDraftVersionId = $this->requireCurrentDraftVersionId($locked);
+
+        $candidateJson = $this->buildCandidateSubmittedJson($locked);
+        $submissionIntentId = $this->generateSubmissionIntentId();
+
+        $staging = $this->store->writeSubmissionStaging((string) $locked->record_id, $submissionIntentId, $candidateJson);
+        $verifiedStaging = $this->store->verifyStoredArtifact($staging['relative_path'], $staging['sha256']);
+
+        if (! hash_equals((string) $verifiedStaging['sha256'], (string) $staging['sha256'])) {
+            throw new AnnotationLifecycleConflictException('Staged submission artifact hash verification failed.');
+        }
+
+        $updated = DB::transaction(function () use ($record, $actor, $expectedLockVersion, $submissionIntentId, $staging, $verifiedStaging, $currentDraftVersionId): AnnotationRecord {
+            $txLocked = $this->lockRecord($record->id);
+            $this->assertCanSubmitDraft($txLocked, $actor, $expectedLockVersion);
+            $this->assertCurrentDraftVersionUnchanged($txLocked, $currentDraftVersionId);
+
+            $nextLockVersion = (int) $txLocked->lock_version + 1;
+            $submissionStartedAt = now();
+
+            $updatedRows = AnnotationRecord::query()
+                ->whereKey($txLocked->id)
+                ->where('lock_version', $expectedLockVersion)
+                ->where('workflow_status', 'draft')
+                ->where('artifact_state', 'draft')
+                ->whereNull('discarded_at')
+                ->whereIn('submission_state', ['none', 'b1_infra_failed'])
+                ->where('current_draft_version_id', $currentDraftVersionId)
+                ->update([
+                    'submission_intent_id' => $submissionIntentId,
+                    'submission_state' => 'staging_written',
+                    'submission_staging_path' => $staging['relative_path'],
+                    'submission_staging_sha256' => $verifiedStaging['sha256'],
+                    'submission_started_at' => $submissionStartedAt,
+                    'lock_version' => $nextLockVersion,
+                    'updated_at' => $submissionStartedAt,
+                ]);
+
+            if ($updatedRows !== 1) {
+                $fresh = $this->lockRecord($txLocked->id);
+                $this->assertCanSubmitDraft($fresh, $actor, $expectedLockVersion);
+                throw new AnnotationLifecycleConflictException('Stale lock_version or submission state changed; reload the record and retry.');
+            }
+
+            $txLocked = $this->lockRecord($txLocked->id);
+
+            $this->appendAudit(
+                record: $txLocked,
+                actor: $actor,
+                actorType: 'user',
+                action: 'submission_intent_created',
+                fromWorkflowStatus: 'draft',
+                toWorkflowStatus: 'draft',
+                comment: null,
+                metadata: [
+                    'submission_intent_id' => $submissionIntentId,
+                    'submission_state' => 'staging_written',
+                    'submission_staging_path' => $staging['relative_path'],
+                    'submission_staging_sha256' => $verifiedStaging['sha256'],
+                    'lock_version' => $txLocked->lock_version,
+                    'previous_lock_version' => $expectedLockVersion,
+                    'current_draft_version_id' => $txLocked->current_draft_version_id,
+                    'current_draft_path' => $txLocked->current_draft_path,
+                    'current_draft_sha256' => $txLocked->current_draft_sha256,
+                ],
+            );
+
+            return $txLocked->fresh();
+        });
+
+        return [
+            'record' => $updated,
+            'submission_intent_id' => $submissionIntentId,
+            'staging' => $staging,
+            'candidate_sha256' => $verifiedStaging['sha256'],
+        ];
     }
 
     /**
@@ -401,6 +545,339 @@ class AnnotationRecordLifecycleService
         }
 
         return $json.PHP_EOL;
+    }
+
+    /**
+     * Build the exact candidate submitted JSON artifact from the current committed draft version.
+     *
+     * Spec evidence: ?6.3 step 3 requires "generate the final v1-compatible candidate record JSON once";
+     * ?9.2/AC-S2-13 require B1 to validate the exact staged submitted artifact bytes with no regeneration.
+     * The v1 structure is grounded in the Step 8A schema (research/phase-13.3/annotation_pipeline_step8a/config/human_recognition.schema.json)
+     * already used by B1 validation: schema_version, record_id, recognition_method, verification_status,
+     * ingredient_labels, uncertain_labels, out_of_scope_labels, reviewer_id, recognition_date, notes, provenance,
+     * and exactly one of individual/group.
+     *
+     * Candidate integrity policy: reject invalid/unsupported draft content with clear validation errors.
+     * Do not silently dedupe, trim, coerce, or discard meaningful draft fields. Only checks required by
+     * the authoritative Step 8A schema/contract are applied: schema_version const, required field presence/shape,
+     * enum/pattern/type constraints, recognition method/payload consistency, and record identity consistency.
+     */
+    private function buildCandidateSubmittedJson(AnnotationRecord $record): string
+    {
+        $draftPayload = $this->readCurrentDraftPayload($record);
+
+        $recordId = $this->normalizeIdentifier((string) $record->record_id, 'record_id');
+        $schemaVersion = is_string($record->schema_version) && trim($record->schema_version) !== ''
+            ? trim($record->schema_version)
+            : 'human-recognition-v1';
+        if ($schemaVersion !== 'human-recognition-v1') {
+            throw new AnnotationLifecycleValidationException('Unsupported schema_version for submission candidate.');
+        }
+
+        $recognitionMethod = $this->normalizeRecognitionMethod((string) $record->recognition_method);
+        $verificationStatus = $this->normalizeVerificationStatus((string) $record->verification_status);
+        $this->assertWorkflowVerificationAllowed('draft', $verificationStatus);
+
+        $allowedTopLevel = [
+            'schema_version', 'record_id', 'recognition_method', 'verification_status',
+            'ingredient_labels', 'uncertain_labels', 'out_of_scope_labels', 'reviewer_id',
+            'recognition_date', 'notes', 'provenance', 'individual', 'group',
+        ];
+        foreach (array_keys($draftPayload) as $key) {
+            if (! in_array($key, $allowedTopLevel, true)) {
+                throw new AnnotationLifecycleValidationException('Draft payload contains unsupported field: '.$key.'.');
+            }
+        }
+
+        if (array_key_exists('schema_version', $draftPayload) && $draftPayload['schema_version'] !== $schemaVersion) {
+            throw new AnnotationLifecycleValidationException('Draft payload schema_version does not match the annotation record.');
+        }
+        if (array_key_exists('record_id', $draftPayload) && $draftPayload['record_id'] !== $recordId) {
+            throw new AnnotationLifecycleValidationException('Draft payload record_id does not match the annotation record.');
+        }
+        if (array_key_exists('recognition_method', $draftPayload) && $draftPayload['recognition_method'] !== $recognitionMethod) {
+            throw new AnnotationLifecycleValidationException('Draft payload recognition_method does not match the annotation record.');
+        }
+        if (array_key_exists('verification_status', $draftPayload) && $draftPayload['verification_status'] !== $verificationStatus) {
+            throw new AnnotationLifecycleValidationException('Draft payload verification_status does not match the annotation record.');
+        }
+
+        $candidate = [
+            'schema_version' => $schemaVersion,
+            'record_id' => $recordId,
+            'recognition_method' => $recognitionMethod,
+            'verification_status' => $verificationStatus,
+            'ingredient_labels' => $this->normalizeStringList($draftPayload['ingredient_labels'] ?? null, 'ingredient_labels', true),
+            'uncertain_labels' => $this->normalizeStringList($draftPayload['uncertain_labels'] ?? null, 'uncertain_labels', true),
+            'out_of_scope_labels' => $this->normalizeStringList($draftPayload['out_of_scope_labels'] ?? null, 'out_of_scope_labels', true),
+            'reviewer_id' => $this->normalizeNullableString($draftPayload['reviewer_id'] ?? null, 'reviewer_id'),
+            'recognition_date' => $this->normalizeNullableString($draftPayload['recognition_date'] ?? null, 'recognition_date'),
+            'notes' => $this->normalizeRequiredString($draftPayload['notes'] ?? null, 'notes'),
+            'provenance' => $this->normalizeProvenance($draftPayload['provenance'] ?? null),
+        ];
+
+        if ($recognitionMethod === 'individual') {
+            $candidate['individual'] = $this->normalizeIndividual($draftPayload['individual'] ?? null);
+            if (array_key_exists('group', $draftPayload)) {
+                throw new AnnotationLifecycleValidationException('Individual recognition draft must not include group payload.');
+            }
+        } else {
+            $candidate['group'] = $this->normalizeGroup($draftPayload['group'] ?? null);
+            if (array_key_exists('individual', $draftPayload)) {
+                throw new AnnotationLifecycleValidationException('Group recognition draft must not include individual payload.');
+            }
+        }
+
+        $json = json_encode($candidate, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        if ($json === false) {
+            throw new AnnotationLifecycleValidationException('Submission candidate could not be encoded as JSON.');
+        }
+
+        return $json.PHP_EOL;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function readCurrentDraftPayload(AnnotationRecord $record): array
+    {
+        $path = $record->current_draft_path;
+        $expectedSha = $record->current_draft_sha256;
+        if (! is_string($path) || trim($path) === '' || ! is_string($expectedSha) || trim($expectedSha) === '') {
+            throw new AnnotationLifecycleValidationException('Draft content is missing or invalid for submission.');
+        }
+
+        $verified = $this->store->verifyStoredArtifact($path, $expectedSha);
+        $absolutePath = $this->store->resolveRelativePath($verified['relative_path'], true);
+        $contents = file_get_contents($absolutePath);
+        if ($contents === false) {
+            throw new AnnotationLifecycleValidationException('Draft content could not be read for submission.');
+        }
+
+        $decoded = json_decode($contents, true);
+        if (! is_array($decoded)) {
+            throw new AnnotationLifecycleValidationException('Draft content is not a valid JSON object for submission.');
+        }
+
+        return $decoded;
+    }
+
+    /** @return list<string> */
+    private function normalizeStringList(mixed $value, string $field, bool $uniqueItems): array
+    {
+        if (! is_array($value) || array_is_list($value) === false) {
+            throw new AnnotationLifecycleValidationException('Draft field '.$field.' must be a list.');
+        }
+
+        $out = [];
+        $seen = [];
+        foreach ($value as $item) {
+            if (! is_string($item)) {
+                throw new AnnotationLifecycleValidationException('Draft field '.$field.' must contain strings.');
+            }
+            if ($item === '') {
+                throw new AnnotationLifecycleValidationException('Draft field '.$field.' must not contain empty strings.');
+            }
+            if ($uniqueItems) {
+                if (array_key_exists($item, $seen)) {
+                    throw new AnnotationLifecycleValidationException('Draft field '.$field.' must not contain duplicate values.');
+                }
+                $seen[$item] = true;
+            }
+            $out[] = $item;
+        }
+
+        return $out;
+    }
+
+    private function normalizeNullableString(mixed $value, string $field): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (! is_string($value)) {
+            throw new AnnotationLifecycleValidationException('Draft field '.$field.' must be a string or null.');
+        }
+
+        return $value;
+    }
+
+    private function normalizeRequiredString(mixed $value, string $field): string
+    {
+        if (! is_string($value)) {
+            throw new AnnotationLifecycleValidationException('Draft field '.$field.' must be a string.');
+        }
+
+        return $value;
+    }
+
+    /**
+     * @return array{source_type:string,source_reference:string,evidence_summary:string,is_human_ground_truth:bool}
+     */
+    private function normalizeProvenance(mixed $value): array
+    {
+        if (! is_array($value) || array_is_list($value)) {
+            throw new AnnotationLifecycleValidationException('Draft provenance must be an object.');
+        }
+        $this->assertNoUnsupportedKeys($value, ['source_type', 'source_reference', 'evidence_summary', 'is_human_ground_truth'], 'provenance');
+
+        foreach (['source_type', 'source_reference', 'evidence_summary', 'is_human_ground_truth'] as $required) {
+            if (! array_key_exists($required, $value)) {
+                throw new AnnotationLifecycleValidationException('Draft provenance.'.$required.' is required.');
+            }
+        }
+
+        $sourceType = $value['source_type'];
+        $allowed = ['historical_individual_inspection', 'historical_group_inspection', 'folder_confirmation_report', 'unknown'];
+        if (! is_string($sourceType) || ! in_array($sourceType, $allowed, true)) {
+            throw new AnnotationLifecycleValidationException('Draft provenance.source_type is invalid.');
+        }
+
+        $sourceReference = $value['source_reference'];
+        $evidenceSummary = $value['evidence_summary'];
+        $isHumanGroundTruth = $value['is_human_ground_truth'];
+        if (! is_string($sourceReference)) {
+            throw new AnnotationLifecycleValidationException('Draft provenance.source_reference must be a string.');
+        }
+        if (! is_string($evidenceSummary)) {
+            throw new AnnotationLifecycleValidationException('Draft provenance.evidence_summary must be a string.');
+        }
+        if (! is_bool($isHumanGroundTruth)) {
+            throw new AnnotationLifecycleValidationException('Draft provenance.is_human_ground_truth must be boolean.');
+        }
+
+        return [
+            'source_type' => $sourceType,
+            'source_reference' => $sourceReference,
+            'evidence_summary' => $evidenceSummary,
+            'is_human_ground_truth' => $isHumanGroundTruth,
+        ];
+    }
+
+    /**
+     * @return array{image_id:string,relative_path:string,original_folder:string,original_filename:string}
+     */
+    private function normalizeIndividual(mixed $value): array
+    {
+        if (! is_array($value) || array_is_list($value)) {
+            throw new AnnotationLifecycleValidationException('Draft individual payload is required for individual recognition.');
+        }
+        $this->assertNoUnsupportedKeys($value, ['image_id', 'relative_path', 'original_folder', 'original_filename'], 'individual');
+        foreach (['image_id', 'relative_path', 'original_folder', 'original_filename'] as $required) {
+            if (! array_key_exists($required, $value)) {
+                throw new AnnotationLifecycleValidationException('Draft individual.'.$required.' is required.');
+            }
+        }
+
+        $imageId = $value['image_id'];
+        $relativePath = $value['relative_path'];
+        $originalFolder = $value['original_folder'];
+        $originalFilename = $value['original_filename'];
+
+        if (! is_string($imageId) || preg_match('/^IMG-[0-9]{6}$/', $imageId) !== 1) {
+            throw new AnnotationLifecycleValidationException('Draft individual.image_id is invalid.');
+        }
+        foreach (['relative_path' => $relativePath, 'original_folder' => $originalFolder, 'original_filename' => $originalFilename] as $field => $fieldValue) {
+            if (! is_string($fieldValue)) {
+                throw new AnnotationLifecycleValidationException('Draft individual.'.$field.' must be a string.');
+            }
+            if ($fieldValue === '') {
+                throw new AnnotationLifecycleValidationException('Draft individual.'.$field.' must not be empty.');
+            }
+        }
+
+        return [
+            'image_id' => $imageId,
+            'relative_path' => $relativePath,
+            'original_folder' => $originalFolder,
+            'original_filename' => $originalFilename,
+        ];
+    }
+
+    /**
+     * @return array{group_id:string,original_folder:string,proposed_ingredient:string|null,image_ids:list<string>,image_count:int}
+     */
+    private function normalizeGroup(mixed $value): array
+    {
+        if (! is_array($value) || array_is_list($value)) {
+            throw new AnnotationLifecycleValidationException('Draft group payload is required for group recognition.');
+        }
+        $this->assertNoUnsupportedKeys($value, ['group_id', 'original_folder', 'proposed_ingredient', 'image_ids', 'image_count'], 'group');
+        foreach (['group_id', 'original_folder', 'proposed_ingredient', 'image_ids', 'image_count'] as $required) {
+            if (! array_key_exists($required, $value)) {
+                throw new AnnotationLifecycleValidationException('Draft group.'.$required.' is required.');
+            }
+        }
+
+        $groupId = $value['group_id'];
+        $originalFolder = $value['original_folder'];
+        $proposedIngredient = $value['proposed_ingredient'];
+        $imageIds = $value['image_ids'];
+        $imageCount = $value['image_count'];
+
+        if (! is_string($groupId)) {
+            throw new AnnotationLifecycleValidationException('Draft group.group_id must be a string.');
+        }
+        if ($groupId === '') {
+            throw new AnnotationLifecycleValidationException('Draft group.group_id must not be empty.');
+        }
+        if (! is_string($originalFolder)) {
+            throw new AnnotationLifecycleValidationException('Draft group.original_folder must be a string.');
+        }
+        if ($originalFolder === '') {
+            throw new AnnotationLifecycleValidationException('Draft group.original_folder must not be empty.');
+        }
+        if ($proposedIngredient !== null && ! is_string($proposedIngredient)) {
+            throw new AnnotationLifecycleValidationException('Draft group.proposed_ingredient must be string or null.');
+        }
+        if (! is_array($imageIds) || array_is_list($imageIds) === false) {
+            throw new AnnotationLifecycleValidationException('Draft group.image_ids must be a list.');
+        }
+        if (count($imageIds) < 1) {
+            throw new AnnotationLifecycleValidationException('Draft group.image_ids must not be empty.');
+        }
+        $normalizedImageIds = [];
+        $seen = [];
+        foreach ($imageIds as $imageId) {
+            if (! is_string($imageId) || preg_match('/^IMG-[0-9]{6}$/', $imageId) !== 1) {
+                throw new AnnotationLifecycleValidationException('Draft group.image_ids contains invalid image_id.');
+            }
+            if (array_key_exists($imageId, $seen)) {
+                throw new AnnotationLifecycleValidationException('Draft group.image_ids must not contain duplicates.');
+            }
+            $seen[$imageId] = true;
+            $normalizedImageIds[] = $imageId;
+        }
+        if (! is_int($imageCount)) {
+            throw new AnnotationLifecycleValidationException('Draft group.image_count must be an integer.');
+        }
+        if ($imageCount < 1) {
+            throw new AnnotationLifecycleValidationException('Draft group.image_count must be >= 1.');
+        }
+        if ($imageCount !== count($normalizedImageIds)) {
+            throw new AnnotationLifecycleValidationException('Draft group.image_count must match image_ids.');
+        }
+
+        return [
+            'group_id' => $groupId,
+            'original_folder' => $originalFolder,
+            'proposed_ingredient' => $proposedIngredient,
+            'image_ids' => $normalizedImageIds,
+            'image_count' => $imageCount,
+        ];
+    }
+
+    /**
+     * @param  array<string,mixed>  $value
+     * @param  list<string>  $allowed
+     */
+    private function assertNoUnsupportedKeys(array $value, array $allowed, string $context): void
+    {
+        foreach (array_keys($value) as $key) {
+            if (! in_array($key, $allowed, true)) {
+                throw new AnnotationLifecycleValidationException('Draft '.$context.' contains unsupported field: '.$key.'.');
+            }
+        }
     }
 
     /**
