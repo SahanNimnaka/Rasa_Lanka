@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\Annotation\AnnotationValidationPersistenceService;
 use App\Services\Annotation\B1ProcessRunner;
 use App\Services\Annotation\B1ValidationAdapter;
+use App\Services\Annotation\B1ValidationResult;
 use App\Services\Annotation\Storage\AnnotationArtifactStore;
 use App\Services\Annotation\Storage\Exceptions\ArtifactHashMismatchException;
 use Illuminate\Database\QueryException;
@@ -492,50 +493,285 @@ class AnnotationValidationPersistenceServiceTest extends TestCase
 
     public function test_db_failure_rolls_back_run_issues_and_audit_together(): void
     {
-
         $record = $this->createRecord();
-
         $store = new AnnotationArtifactStore;
-
         $staging = $store->writeSubmissionStaging($record->record_id, 'intent-1', '{"record":"ok"}');
-
         $adapter = new B1ValidationAdapter($this->completedRunner(), config('annotation'));
-
         $service = new AnnotationValidationPersistenceService($adapter, $store);
 
         AnnotationReviewAction::creating(function () {
-
             throw new RuntimeException('simulated audit failure');
         });
 
         try {
-
             $service->persistStagedSubmissionAttempt($record, 'intent-1', $staging['relative_path'], $staging['sha256'], $record->created_by_user_id);
-
             $this->fail('Expected failure.');
-
         } catch (RuntimeException $e) {
-
             $this->assertSame('simulated audit failure', $e->getMessage());
-
         } finally {
-
             AnnotationReviewAction::clearBootedModels();
-
         }
 
         $this->assertDatabaseCount('annotation_validation_runs', 0);
-
         $this->assertDatabaseCount('annotation_validation_issues', 0);
-
         $this->assertDatabaseCount('annotation_review_actions', 0);
 
         // Report artifacts are deterministic and immutable; if they were written before DB tx failure,
-
         // they remain inspectable and may be reused idempotently by reconciliation/future safe logic.
-
         $this->assertNotEmpty(glob($this->artifactRoot.'/validation-runs/'.$record->record_id.'/*/step8b_validation_report.json') ?: []);
+    }
 
+    public function test_phase_b_callback_executes_inside_transaction_and_commits_atomically(): void
+    {
+        $record = $this->createRecord();
+        $store = new AnnotationArtifactStore;
+        $staging = $store->writeSubmissionStaging($record->record_id, 'intent-1', '{"record":"ok"}');
+        $adapter = new B1ValidationAdapter($this->completedRunner(), config('annotation'));
+        $service = new AnnotationValidationPersistenceService($adapter, $store);
+
+        $observed = null;
+        $result = $service->persistStagedSubmissionAttempt(
+            $record,
+            'intent-1',
+            $staging['relative_path'],
+            $staging['sha256'],
+            $record->created_by_user_id,
+            'user',
+            'b1-test',
+            function (AnnotationValidationRun $run, B1ValidationResult $b1Result, AnnotationRecord $callbackRecord) use (&$observed): void {
+                $observed = [
+                    'tx_level' => DB::transactionLevel(),
+                    'run_exists' => AnnotationValidationRun::query()->whereKey($run->id)->exists(),
+                    'issues' => AnnotationValidationIssue::query()->where('validation_run_id', $run->id)->count(),
+                    'audits' => AnnotationReviewAction::query()->where('annotation_record_id', $callbackRecord->id)->count(),
+                    'b1_ok' => $b1Result->ok,
+                ];
+
+                $callbackRecord->submission_state = 'b1_completed';
+                $callbackRecord->lock_version = 2;
+                $callbackRecord->save();
+            }
+        );
+
+        $this->assertSame(1, $observed['tx_level'] ?? null);
+        $this->assertTrue($observed['run_exists'] ?? false);
+        $this->assertSame(1, $observed['issues'] ?? null);
+        $this->assertSame(1, $observed['audits'] ?? null);
+        $this->assertTrue($observed['b1_ok'] ?? false);
+
+        $this->assertDatabaseHas('annotation_records', [
+            'id' => $record->id,
+            'submission_state' => 'b1_completed',
+            'lock_version' => 2,
+        ]);
+        $this->assertDatabaseCount('annotation_validation_runs', 1);
+        $this->assertDatabaseCount('annotation_validation_issues', 1);
+        $this->assertDatabaseCount('annotation_review_actions', 1);
+        $this->assertSame('completed', $result['run']->status);
+    }
+
+    public function test_phase_b_callback_throw_rolls_back_run_issues_audit_and_record_changes(): void
+    {
+        $record = $this->createRecord();
+        $store = new AnnotationArtifactStore;
+        $staging = $store->writeSubmissionStaging($record->record_id, 'intent-1', '{"record":"ok"}');
+        $adapter = new B1ValidationAdapter($this->completedRunner(), config('annotation'));
+        $service = new AnnotationValidationPersistenceService($adapter, $store);
+
+        try {
+            $service->persistStagedSubmissionAttempt(
+                $record,
+                'intent-1',
+                $staging['relative_path'],
+                $staging['sha256'],
+                $record->created_by_user_id,
+                'user',
+                'b1-test',
+                function (AnnotationValidationRun $run, B1ValidationResult $b1Result, AnnotationRecord $callbackRecord): void {
+                    $this->assertTrue(AnnotationValidationRun::query()->whereKey($run->id)->exists());
+                    $callbackRecord->submission_state = 'b1_completed';
+                    $callbackRecord->lock_version = 2;
+                    $callbackRecord->save();
+                    throw new RuntimeException('callback lifecycle conflict');
+                }
+            );
+            $this->fail('Expected callback exception.');
+        } catch (RuntimeException $e) {
+            $this->assertSame('callback lifecycle conflict', $e->getMessage());
+        }
+
+        $this->assertDatabaseCount('annotation_validation_runs', 0);
+        $this->assertDatabaseCount('annotation_validation_issues', 0);
+        $this->assertDatabaseCount('annotation_review_actions', 0);
+        $this->assertDatabaseHas('annotation_records', [
+            'id' => $record->id,
+            'submission_state' => 'staging_written',
+            'lock_version' => 1,
+        ]);
+    }
+
+    public function test_outer_transaction_rollback_rolls_back_callback_and_validation_persistence(): void
+    {
+        $record = $this->createRecord();
+        $store = new AnnotationArtifactStore;
+        $staging = $store->writeSubmissionStaging($record->record_id, 'intent-1', '{"record":"ok"}');
+        $adapter = new B1ValidationAdapter($this->completedRunner(), config('annotation'));
+        $service = new AnnotationValidationPersistenceService($adapter, $store);
+
+        try {
+            DB::transaction(function () use ($service, $record, $staging): void {
+                $service->persistStagedSubmissionAttempt(
+                    $record,
+                    'intent-1',
+                    $staging['relative_path'],
+                    $staging['sha256'],
+                    $record->created_by_user_id,
+                    'user',
+                    'b1-test',
+                    function (AnnotationValidationRun $run, B1ValidationResult $b1Result, AnnotationRecord $callbackRecord): void {
+                        $callbackRecord->submission_state = 'b1_completed';
+                        $callbackRecord->lock_version = 2;
+                        $callbackRecord->save();
+                    }
+                );
+
+                $this->assertDatabaseCount('annotation_validation_runs', 1);
+                throw new RuntimeException('outer rollback');
+            });
+            $this->fail('Expected outer rollback.');
+        } catch (RuntimeException $e) {
+            $this->assertSame('outer rollback', $e->getMessage());
+        }
+
+        $this->assertDatabaseCount('annotation_validation_runs', 0);
+        $this->assertDatabaseCount('annotation_validation_issues', 0);
+        $this->assertDatabaseCount('annotation_review_actions', 0);
+        $this->assertDatabaseHas('annotation_records', [
+            'id' => $record->id,
+            'submission_state' => 'staging_written',
+            'lock_version' => 1,
+        ]);
+    }
+
+    public function test_duplicate_attempt_protection_still_works_with_phase_b_callback(): void
+    {
+        $record = $this->createRecord();
+        $store = new AnnotationArtifactStore;
+        $staging = $store->writeSubmissionStaging($record->record_id, 'intent-1', '{"record":"ok"}');
+        $adapter = new B1ValidationAdapter($this->completedRunner(), config('annotation'));
+        $service = new AnnotationValidationPersistenceService($adapter, $store);
+
+        $service->persistStagedSubmissionAttempt(
+            $record,
+            'intent-1',
+            $staging['relative_path'],
+            $staging['sha256'],
+            $record->created_by_user_id,
+            'user',
+            'b1-test',
+            function (AnnotationValidationRun $run, B1ValidationResult $b1Result, AnnotationRecord $callbackRecord): void {
+                $callbackRecord->submission_state = 'b1_completed';
+                $callbackRecord->lock_version = 2;
+                $callbackRecord->save();
+            }
+        );
+
+        $callbackCalled = false;
+        try {
+            $service->persistStagedSubmissionAttempt(
+                $record,
+                'intent-1',
+                $staging['relative_path'],
+                $staging['sha256'],
+                $record->created_by_user_id,
+                'user',
+                'b1-test',
+                function () use (&$callbackCalled): void {
+                    $callbackCalled = true;
+                }
+            );
+            $this->fail('Expected duplicate-attempt RuntimeException.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('validation run already exists', $e->getMessage());
+        }
+
+        $this->assertFalse($callbackCalled);
+        $this->assertDatabaseCount('annotation_validation_runs', 1);
+        $this->assertDatabaseCount('annotation_validation_issues', 1);
+        $this->assertDatabaseCount('annotation_review_actions', 1);
+    }
+
+    public function test_b1_execution_occurs_outside_database_transaction(): void
+    {
+        $record = $this->createRecord();
+        $store = new AnnotationArtifactStore;
+        $staging = $store->writeSubmissionStaging($record->record_id, 'intent-1', '{"record":"ok"}');
+
+        $txLevels = [];
+        $runner = $this->mock(B1ProcessRunner::class);
+        $runner->shouldReceive('run')->andReturnUsing(function (array $command) use (&$txLevels) {
+            $txLevels[] = DB::transactionLevel();
+            if (in_array('--version', $command, true) || in_array('-c', $command, true)) {
+                return ['exit_code' => 0, 'stdout' => 'ok', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
+            }
+            $outDir = $command[array_search('--out-dir', $command, true) + 1];
+            File::ensureDirectoryExists($outDir);
+            File::put($outDir.DIRECTORY_SEPARATOR.'step8b_validation_report.json', json_encode([
+                'summary' => ['records_checked' => 1, 'valid_records' => 1, 'invalid_records' => 0, 'export_eligible_canonical_records' => 1, 'error_count' => 0, 'warning_count' => 0, 'export_block_count' => 0, 'issues_by_code' => []],
+                'results' => [['record_id' => 'R1', 'recognition_method' => 'individual', 'verification_status' => 'confirmed', 'valid' => true, 'export_eligible_canonical' => true, 'export_block_codes' => [], 'resolved_ingredient_labels' => []]],
+                'issues' => [],
+            ]));
+
+            return ['exit_code' => 0, 'stdout' => '', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 5];
+        });
+
+        $adapter = new B1ValidationAdapter($runner, config('annotation'));
+        $service = new AnnotationValidationPersistenceService($adapter, $store);
+        $service->persistStagedSubmissionAttempt($record, 'intent-1', $staging['relative_path'], $staging['sha256'], $record->created_by_user_id);
+
+        $this->assertNotEmpty($txLevels);
+        foreach ($txLevels as $level) {
+            $this->assertSame(0, $level, 'B1 execution must not run inside a DB transaction.');
+        }
+    }
+
+    public function test_validation_report_artifact_writes_occur_outside_database_transaction(): void
+    {
+        $record = $this->createRecord();
+        $stagingStore = new AnnotationArtifactStore;
+        $staging = $stagingStore->writeSubmissionStaging($record->record_id, 'intent-1', '{"record":"ok"}');
+
+        $levels = [];
+        $store = new class($levels) extends AnnotationArtifactStore
+        {
+            /** @var list<int> */
+            public array $writeTxLevels;
+
+            /**
+             * @param  list<int>  $levels
+             */
+            public function __construct(array &$levels)
+            {
+                parent::__construct();
+                $this->writeTxLevels = &$levels;
+            }
+
+            public function writeValidationReport(string $recordId, string $runId, string $fileName, string $content): array
+            {
+                $this->writeTxLevels[] = DB::transactionLevel();
+
+                return parent::writeValidationReport($recordId, $runId, $fileName, $content);
+            }
+        };
+
+        $adapter = new B1ValidationAdapter($this->completedRunner(), config('annotation'));
+        $service = new AnnotationValidationPersistenceService($adapter, $store);
+        $service->persistStagedSubmissionAttempt($record, 'intent-1', $staging['relative_path'], $staging['sha256'], $record->created_by_user_id);
+
+        $this->assertNotEmpty($levels);
+        foreach ($levels as $level) {
+            $this->assertSame(0, $level, 'Validation report artifact writes must occur outside DB transactions.');
+        }
     }
 
     private function createRecord(): AnnotationRecord
@@ -684,5 +920,4 @@ class AnnotationValidationPersistenceServiceTest extends TestCase
         return $runner;
 
     }
-
 }

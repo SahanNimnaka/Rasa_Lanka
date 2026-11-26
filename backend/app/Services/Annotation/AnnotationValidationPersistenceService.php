@@ -26,63 +26,32 @@ class AnnotationValidationPersistenceService
 
     /**
      * Phase A (no DB tx): resolve/verify staged artifact, execute B1, capture/persist exact report bytes.
-
-
-
      * Phase B (short DB tx): persist validation run/issues/audit atomically.
-
-
-
      *
-
-
-
      * Transaction-safe if called inside an outer DB transaction (I6 composition).
-
-
-
      *
-
-
-
+     * @param  (\Closure(AnnotationValidationRun, B1ValidationResult, AnnotationRecord): void)|null  $withinPhaseBTransaction
+     *                                                                                                                         Optional I6 hook executed inside the Phase B DB transaction after validation run/issues/audit are inserted.
+     *                                                                                                                         It may perform only database mutations that must be atomic with validation persistence (for example
+     *                                                                                                                         submission_state/lock_version updates). It must not run B1, write/delete filesystem artifacts, perform
+     *                                                                                                                         HTTP requests, start external processes, or create duplicate validation runs/audit events. Throwing rolls
+     *                                                                                                                         back all Phase B database writes.
      * @return array{
-
-
-
      *   run:AnnotationValidationRun,
-
-
-
      *   b1_result:B1ValidationResult,
-
-
-
      *   report_json:array{relative_path:string,sha256:string,bytes:int,idempotent:bool}|null,
-
-
-
      *   report_csv:array{relative_path:string,sha256:string,bytes:int,idempotent:bool}|null
-
-
-
      * }
      */
     public function persistStagedSubmissionAttempt(
-
         AnnotationRecord $record,
-
         string $submissionIntentId,
-
         string $stagedRelativePath,
-
         string $stagedSha256,
-
         ?int $executedByUserId = null,
-
         string $actorType = 'user',
-
         ?string $b1Version = null,
-
+        ?\Closure $withinPhaseBTransaction = null,
     ): array {
 
         $record = $this->requireRecord($record);
@@ -168,44 +137,34 @@ class AnnotationValidationPersistenceService
         // Phase B
 
         try {
-
-            $run = DB::transaction(function () use ($record, $submissionIntentId, $payload): AnnotationValidationRun {
-
+            $run = DB::transaction(function () use ($record, $submissionIntentId, $payload, $b1Result, $withinPhaseBTransaction): AnnotationValidationRun {
                 $duplicate = $this->findExistingRunForAttempt((int) $record->id, $submissionIntentId);
 
                 if ($duplicate !== null) {
-
                     throw new RuntimeException('A validation run already exists for this record and submission intent.');
                 }
 
                 $run = new AnnotationValidationRun;
-
                 $run->forceFill($payload['run']);
-
                 $run->save();
 
                 foreach ($payload['issues'] as $issue) {
-
                     $issueModel = new AnnotationValidationIssue;
-
                     $issueModel->forceFill($issue + ['validation_run_id' => $run->id]);
-
                     $issueModel->save();
-
                 }
 
                 AnnotationReviewAction::query()->create($payload['audit'] + [
-
                     'annotation_record_id' => $record->id,
-
                     'created_at' => now(),
-
                 ]);
 
+                if ($withinPhaseBTransaction !== null) {
+                    $withinPhaseBTransaction($run, $b1Result, $record);
+                }
+
                 return $run->fresh(['issues']);
-
             });
-
         } catch (UniqueConstraintViolationException|QueryException $e) {
 
             if ($this->isDuplicateAttemptConstraintViolation($e, (int) $record->id, $submissionIntentId)) {
@@ -781,5 +740,4 @@ class AnnotationValidationPersistenceService
         return $normalized;
 
     }
-
 }
