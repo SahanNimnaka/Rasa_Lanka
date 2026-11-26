@@ -4,6 +4,7 @@ namespace App\Services\Annotation;
 
 use App\Models\AnnotationRecord;
 use App\Models\AnnotationReviewAction;
+use App\Models\AnnotationValidationRun;
 use App\Models\User;
 use App\Services\Annotation\Exceptions\AnnotationLifecycleAuthorizationException;
 use App\Services\Annotation\Exceptions\AnnotationLifecycleConflictException;
@@ -532,6 +533,46 @@ class AnnotationRecordLifecycleService
     }
 
     /**
+     * Execute B1 validation for an active staging submission intent and persist OD-01/I5 outcomes (S2-I6-C2, ?6.3 steps 6-7).
+     *
+     * Promotion/finalization/reconciliation are intentionally out of scope.
+     *
+     * @return array{record:AnnotationRecord,run:AnnotationValidationRun,b1_result:B1ValidationResult,report_json:array<string,mixed>|null,report_csv:array<string,mixed>|null}
+     */
+    public function executeSubmissionIntentValidation(AnnotationRecord $record, User $actor, int $expectedLockVersion, ?string $b1Version = null): array
+    {
+        $this->requireAnnotationRole($actor);
+        $this->assertSupportedDriver();
+
+        $locked = $this->lockRecord($record->id);
+        $this->assertCanExecuteStagingIntent($locked, $actor, $expectedLockVersion);
+
+        $snapshot = $this->captureStagingIntentSnapshot($locked, $expectedLockVersion);
+        $validationPersistence = $this->validationPersistence();
+
+        $result = $validationPersistence->persistStagedSubmissionAttempt(
+            $locked,
+            $snapshot['submission_intent_id'],
+            $snapshot['submission_staging_path'],
+            $snapshot['submission_staging_sha256'],
+            (int) $actor->id,
+            'user',
+            $b1Version,
+            function (AnnotationValidationRun $run, B1ValidationResult $b1Result) use ($snapshot, $actor): void {
+                $this->applySubmissionIntentValidationTransition($snapshot, $run, $b1Result, $actor);
+            }
+        );
+
+        return [
+            'record' => $this->lockRecord($record->id),
+            'run' => $result['run'],
+            'b1_result' => $result['b1_result'],
+            'report_json' => $result['report_json'],
+            'report_csv' => $result['report_csv'],
+        ];
+    }
+
+    /**
      * @param  array<string,mixed>  $draftPayload
      */
     private function encodeDraftPayload(array $draftPayload, string $recordId): string
@@ -896,5 +937,165 @@ class AnnotationRecordLifecycleService
             'metadata_json' => $metadata,
             'created_at' => now(),
         ]);
+    }
+
+    /**
+     * @param  array{record_id:int,record_uuid:string,expected_lock_version:int,submission_intent_id:string,submission_staging_path:string,submission_staging_sha256:string}  $snapshot
+     */
+    private function applySubmissionIntentValidationTransition(array $snapshot, AnnotationValidationRun $run, B1ValidationResult $b1Result, User $actor): void
+    {
+        $txLocked = $this->lockRecord($snapshot['record_id']);
+        $this->assertStagingIntentSnapshotMatches($txLocked, $snapshot);
+
+        $targetState = $b1Result->ok ? 'b1_completed' : 'b1_infra_failed';
+        $nextLockVersion = (int) $txLocked->lock_version + 1;
+        $updatedAt = now();
+
+        $updatedRows = AnnotationRecord::query()
+            ->whereKey($txLocked->id)
+            ->where('lock_version', $snapshot['expected_lock_version'])
+            ->where('submission_intent_id', $snapshot['submission_intent_id'])
+            ->where('submission_state', 'staging_written')
+            ->where('submission_staging_path', $snapshot['submission_staging_path'])
+            ->where('submission_staging_sha256', $snapshot['submission_staging_sha256'])
+            ->where('workflow_status', 'draft')
+            ->where('artifact_state', 'draft')
+            ->whereNull('discarded_at')
+            ->whereNull('submitted_json_path')
+            ->whereNull('submitted_artifact_sha256')
+            ->whereNull('submission_finalized_at')
+            ->update([
+                'submission_state' => $targetState,
+                'lock_version' => $nextLockVersion,
+                'updated_at' => $updatedAt,
+            ]);
+
+        if ($updatedRows !== 1) {
+            $fresh = $this->lockRecord($snapshot['record_id']);
+            $this->assertStagingIntentSnapshotMatches($fresh, $snapshot);
+            throw new AnnotationLifecycleConflictException('Stale submission intent or lock_version; reload the record and retry.');
+        }
+
+        $txLocked = $this->lockRecord($snapshot['record_id']);
+
+        if (! $b1Result->ok) {
+            $infra = is_array($b1Result->payload['infrastructure_error'] ?? null) ? $b1Result->payload['infrastructure_error'] : [];
+            $this->appendAudit(
+                record: $txLocked,
+                actor: $actor,
+                actorType: 'user',
+                action: 'submission_infra_failed',
+                fromWorkflowStatus: 'draft',
+                toWorkflowStatus: 'draft',
+                comment: null,
+                metadata: [
+                    'submission_intent_id' => $snapshot['submission_intent_id'],
+                    'validation_run_id' => $run->run_id,
+                    'from_submission_state' => 'staging_written',
+                    'to_submission_state' => 'b1_infra_failed',
+                    'previous_lock_version' => $snapshot['expected_lock_version'],
+                    'lock_version' => $txLocked->lock_version,
+                    'submission_staging_path' => $snapshot['submission_staging_path'],
+                    'submission_staging_sha256' => $snapshot['submission_staging_sha256'],
+                    'infra_error_code' => is_string($infra['code'] ?? null) ? $infra['code'] : null,
+                    'timed_out' => (bool) ($infra['timed_out'] ?? false),
+                    'exit_code' => isset($infra['exit_code']) && is_numeric($infra['exit_code']) ? (int) $infra['exit_code'] : null,
+                ],
+            );
+        }
+    }
+
+    /**
+     * @return array{record_id:int,record_uuid:string,expected_lock_version:int,submission_intent_id:string,submission_staging_path:string,submission_staging_sha256:string}
+     */
+    private function captureStagingIntentSnapshot(AnnotationRecord $record, int $expectedLockVersion): array
+    {
+        $intentId = $record->submission_intent_id;
+        $stagingPath = $record->submission_staging_path;
+        $stagingSha = $record->submission_staging_sha256;
+        if (! is_string($intentId) || trim($intentId) === '' || ! is_string($stagingPath) || trim($stagingPath) === '' || ! is_string($stagingSha) || trim($stagingSha) === '') {
+            throw new AnnotationLifecycleValidationException('Active staging intent metadata is missing or invalid.');
+        }
+
+        $stagingSha = strtolower(trim($stagingSha));
+        if (preg_match('/\A[a-f0-9]{64}\z/', $stagingSha) !== 1) {
+            throw new AnnotationLifecycleValidationException('Active staging intent SHA-256 is invalid.');
+        }
+
+        return [
+            'record_id' => (int) $record->id,
+            'record_uuid' => (string) $record->record_id,
+            'expected_lock_version' => $expectedLockVersion,
+            'submission_intent_id' => $this->normalizeIdentifier($intentId, 'submission_intent_id'),
+            'submission_staging_path' => $stagingPath,
+            'submission_staging_sha256' => $stagingSha,
+        ];
+    }
+
+    /**
+     * @param  array{record_id:int,record_uuid:string,expected_lock_version:int,submission_intent_id:string,submission_staging_path:string,submission_staging_sha256:string}  $snapshot
+     */
+    private function assertStagingIntentSnapshotMatches(AnnotationRecord $record, array $snapshot): void
+    {
+        if ((int) $record->id !== $snapshot['record_id']) {
+            throw new AnnotationLifecycleConflictException('Submission intent record mismatch.');
+        }
+        if ((int) $record->lock_version !== $snapshot['expected_lock_version']) {
+            throw new AnnotationLifecycleConflictException('Stale lock_version; reload the record and retry.');
+        }
+        $this->assertCanExecuteStagingIntent($record, null, $snapshot['expected_lock_version']);
+        if ((string) $record->submission_intent_id !== $snapshot['submission_intent_id']) {
+            throw new AnnotationLifecycleConflictException('Submission intent changed; reload the record and retry.');
+        }
+        if ((string) $record->submission_staging_path !== $snapshot['submission_staging_path']
+            || strtolower((string) $record->submission_staging_sha256) !== $snapshot['submission_staging_sha256']) {
+            throw new AnnotationLifecycleConflictException('Staged submission artifact metadata changed; reload the record and retry.');
+        }
+    }
+
+    private function assertCanExecuteStagingIntent(AnnotationRecord $record, ?User $actor, int $expectedLockVersion): void
+    {
+        if ($actor !== null) {
+            $isOwner = (int) $record->created_by_user_id === (int) $actor->id;
+            $canExecuteByRole = $actor->hasAnnotationRole();
+            if (! $isOwner || ! $canExecuteByRole) {
+                throw new AnnotationLifecycleAuthorizationException('Only the draft owner with an authorized annotation role may execute submission validation.');
+            }
+        }
+
+        if ($expectedLockVersion < 1 || (int) $record->lock_version !== $expectedLockVersion) {
+            throw new AnnotationLifecycleConflictException('Stale lock_version; reload the record and retry.');
+        }
+
+        if ((string) $record->workflow_status !== 'draft') {
+            throw new AnnotationLifecycleConflictException('Only draft records can execute submission validation.');
+        }
+        if ((string) $record->artifact_state !== 'draft') {
+            throw new AnnotationLifecycleConflictException('Finalized records cannot execute submission validation.');
+        }
+        if ($record->discarded_at !== null) {
+            throw new AnnotationLifecycleConflictException('Discarded records cannot execute submission validation.');
+        }
+        if ((string) $record->submission_state !== 'staging_written') {
+            throw new AnnotationLifecycleConflictException('Submission validation can only execute an active staging_written intent.');
+        }
+        if (! is_string($record->submission_intent_id) || trim($record->submission_intent_id) === ''
+            || ! is_string($record->submission_staging_path) || trim($record->submission_staging_path) === ''
+            || ! is_string($record->submission_staging_sha256) || trim($record->submission_staging_sha256) === '') {
+            throw new AnnotationLifecycleValidationException('Active staging intent metadata is missing or invalid.');
+        }
+        if ($record->submitted_json_path !== null || $record->submitted_artifact_sha256 !== null || $record->submission_finalized_at !== null) {
+            throw new AnnotationLifecycleConflictException('Finalized records cannot execute submission validation.');
+        }
+    }
+
+    private function validationPersistence(): AnnotationValidationPersistenceService
+    {
+        $service = app(AnnotationValidationPersistenceService::class);
+        if (! $service instanceof AnnotationValidationPersistenceService) {
+            throw new RuntimeException('Annotation validation persistence service is unavailable.');
+        }
+
+        return $service;
     }
 }

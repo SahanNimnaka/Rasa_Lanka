@@ -4,8 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\AnnotationRecord;
 use App\Models\AnnotationReviewAction;
+use App\Models\AnnotationValidationRun;
 use App\Models\User;
 use App\Services\Annotation\AnnotationRecordLifecycleService;
+use App\Services\Annotation\AnnotationValidationPersistenceService;
+use App\Services\Annotation\B1ProcessRunner;
+use App\Services\Annotation\B1ValidationAdapter;
+use App\Services\Annotation\B1ValidationResult;
 use App\Services\Annotation\Exceptions\AnnotationLifecycleAuthorizationException;
 use App\Services\Annotation\Exceptions\AnnotationLifecycleConflictException;
 use App\Services\Annotation\Exceptions\AnnotationLifecycleValidationException;
@@ -1428,5 +1433,486 @@ class AnnotationRecordLifecycleServiceTest extends TestCase
         $user->forceFill(['role' => $role])->save();
 
         return $user->fresh();
+    }
+
+    public function test_execute_submission_intent_validation_completed_valid_transitions_and_persists(): void
+    {
+        $actor = $this->annotationUser();
+        $service = $this->makeService();
+        $record = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-001'), 'rec-c2-001')['record'];
+        $intent = $service->createSubmissionIntent($record->fresh(), $actor, 1)['record'];
+        $this->bindCompletedB1Persistence(true, [], [], 'b1-test');
+
+        $result = $service->executeSubmissionIntentValidation($intent->fresh(), $actor, 2, 'b1-test');
+        $updated = $result['record'];
+        $run = $result['run'];
+        if ($updated->submission_state !== 'b1_completed') {
+            fwrite(STDERR, json_encode(['status' => $run->status, 'infra' => $run->infra_error_code, 'ok' => $result['b1_result']->ok, 'payload' => $result['b1_result']->payload])."\n");
+        }
+
+        $this->assertSame('b1_completed', $updated->submission_state);
+        $this->assertSame('draft', $updated->workflow_status);
+        $this->assertSame('draft', $updated->artifact_state);
+        $this->assertSame(3, $updated->lock_version);
+        $this->assertNull($updated->submitted_json_path);
+        $this->assertNull($updated->submitted_artifact_sha256);
+        $this->assertNull($updated->submission_finalized_at);
+        $this->assertSame($intent->submission_intent_id, $updated->submission_intent_id);
+        $this->assertSame($intent->submission_staging_path, $updated->submission_staging_path);
+        $this->assertSame($intent->submission_staging_sha256, $updated->submission_staging_sha256);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertTrue((bool) $run->is_valid);
+        $this->assertSame($intent->submission_staging_path, $run->input_artifact_path);
+        $this->assertSame($intent->submission_staging_sha256, $run->input_artifact_sha256);
+        $this->assertSame('staged_path', $run->input_evidence_state);
+        $this->assertDatabaseHas('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'validation_completed']);
+        $this->assertDatabaseMissing('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'submission_infra_failed']);
+    }
+
+    public function test_execute_submission_intent_validation_completed_invalid_uses_b1_completed_and_validation_failed(): void
+    {
+        $actor = $this->annotationUser();
+        $service = $this->makeService();
+        $record = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-002'), 'rec-c2-002')['record'];
+        $intent = $service->createSubmissionIntent($record->fresh(), $actor, 1)['record'];
+        $errors = [['severity' => 'error', 'code' => 'ERR_X', 'record_id' => 'rec-c2-002', 'image_id' => null, 'field' => 'ingredient_labels', 'message' => 'bad', 'details' => []]];
+        $this->bindCompletedB1Persistence(false, $errors, [], 'b1-test');
+
+        $result = $service->executeSubmissionIntentValidation($intent->fresh(), $actor, 2, 'b1-test');
+        $updated = $result['record'];
+        $run = $result['run'];
+        $this->assertSame('b1_completed', $updated->submission_state);
+        $this->assertSame(3, $updated->lock_version);
+        $this->assertSame('completed', $run->status);
+        $this->assertFalse((bool) $run->is_valid);
+        $this->assertSame(1, $run->error_count);
+        $this->assertDatabaseHas('annotation_validation_issues', ['validation_run_id' => $run->id, 'code' => 'ERR_X']);
+        $this->assertDatabaseHas('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'validation_failed']);
+        $this->assertDatabaseMissing('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'submission_infra_failed']);
+    }
+
+    public function test_execute_submission_intent_validation_od01_infra_failure_persists_and_transitions(): void
+    {
+        $actor = $this->annotationUser();
+        $service = $this->makeService();
+        $record = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-003'), 'rec-c2-003')['record'];
+        $intent = $service->createSubmissionIntent($record->fresh(), $actor, 1)['record'];
+        $stagingPath = $intent->submission_staging_path;
+        $stagingSha = $intent->submission_staging_sha256;
+        $this->bindInfraB1Persistence('B1_PROCESS_FAILED', false, 2);
+
+        $result = $service->executeSubmissionIntentValidation($intent->fresh(), $actor, 2, 'b1-test');
+        $updated = $result['record'];
+        $run = $result['run'];
+
+        $this->assertSame('b1_infra_failed', $updated->submission_state);
+        $this->assertSame('draft', $updated->workflow_status);
+        $this->assertSame('draft', $updated->artifact_state);
+        $this->assertSame(3, $updated->lock_version);
+        $this->assertNull($updated->submitted_json_path);
+        $this->assertNull($updated->submitted_artifact_sha256);
+        $this->assertNull($updated->submission_finalized_at);
+        $this->assertSame($stagingPath, $updated->submission_staging_path);
+        $this->assertSame($stagingSha, $updated->submission_staging_sha256);
+        $this->assertFileExists($this->artifactRoot.'/'.$stagingPath);
+
+        $this->assertSame('infra_failed', $run->status);
+        $this->assertSame('B1_PROCESS_FAILED', $run->infra_error_code);
+        $this->assertSame($stagingPath, $run->input_artifact_path);
+        $this->assertSame($stagingSha, $run->input_artifact_sha256);
+        $this->assertSame('staged_path', $run->input_evidence_state);
+        $this->assertDatabaseHas('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'validation_infra_failed']);
+        $this->assertDatabaseHas('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'submission_infra_failed']);
+    }
+
+    public function test_execute_submission_intent_validation_rejects_preconditions(): void
+    {
+        $owner = $this->annotationUser();
+        $other = $this->annotationUser();
+        $service = $this->makeService();
+        $this->bindCompletedB1Persistence();
+
+        $record = $service->createDraft($owner, $this->validIndividualDraftPayload('rec-c2-004'), 'rec-c2-004')['record'];
+        try {
+            $service->executeSubmissionIntentValidation($record->fresh(), $owner, 1);
+            $this->fail();
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('staging_written', $e->getMessage());
+        }
+
+        $intent = $service->createSubmissionIntent($record->fresh(), $owner, 1)['record'];
+        try {
+            $service->executeSubmissionIntentValidation($intent->fresh(), $other, 2);
+            $this->fail();
+        } catch (AnnotationLifecycleAuthorizationException $e) {
+            $this->assertStringContainsString('owner', strtolower($e->getMessage()));
+        }
+        try {
+            $service->executeSubmissionIntentValidation($intent->fresh(), $owner, 1);
+            $this->fail();
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('lock_version', strtolower($e->getMessage()));
+        }
+    }
+
+    public function test_execute_submission_intent_validation_rejects_wrong_state_and_duplicate_intent(): void
+    {
+        $actor = $this->annotationUser();
+        $service = $this->makeService();
+        $this->bindCompletedB1Persistence();
+        $record = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-005'), 'rec-c2-005')['record'];
+        $intent = $service->createSubmissionIntent($record->fresh(), $actor, 1)['record'];
+        $service->executeSubmissionIntentValidation($intent->fresh(), $actor, 2);
+
+        $completed = $record->fresh();
+        $this->assertSame('b1_completed', $completed->submission_state);
+        try {
+            $service->executeSubmissionIntentValidation($completed, $actor, 3);
+            $this->fail();
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('staging_written', $e->getMessage());
+        }
+        $this->assertSame(1, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count());
+    }
+
+    public function test_execute_submission_intent_validation_callback_mismatch_rolls_back_phase_b(): void
+    {
+        $actor = $this->annotationUser();
+        $service = $this->makeService();
+        $record = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-006'), 'rec-c2-006')['record'];
+        $intent = $service->createSubmissionIntent($record->fresh(), $actor, 1)['record'];
+
+        $runner = new class extends B1ProcessRunner
+        {
+            public function run(array $command, string $cwd, int $timeoutSeconds, ?array $env = null): array
+            {
+                $reportPath = null;
+                $recordPath = null;
+                for ($i = 0; $i < count($command); $i++) {
+                    if ($command[$i] === '--out' && isset($command[$i + 1])) {
+                        $reportPath = $command[$i + 1].DIRECTORY_SEPARATOR.'step8b_validation_report.json';
+                    }
+                    if ($command[$i] === '--records' && isset($command[$i + 1])) {
+                        $recordPath = $command[$i + 1];
+                    }
+                }
+                $record = is_string($recordPath) && is_file($recordPath) ? json_decode((string) file_get_contents($recordPath), true) : [];
+                $record = is_array($record) ? $record : [];
+                $rid = $record['record_id'] ?? 'rec';
+                $payload = ['schema_version' => 'b1-validation-report-v1', 'summary' => ['records_checked' => 1, 'valid_records' => 1, 'invalid_records' => 0, 'export_eligible_canonical_records' => 1, 'error_count' => 0, 'warning_count' => 0, 'export_block_count' => 0, 'issues_by_code' => []], 'results' => [['record_id' => $rid, 'source' => is_string($recordPath) ? basename($recordPath) : $rid.'.json', 'recognition_method' => $record['recognition_method'] ?? null, 'verification_status' => $record['verification_status'] ?? null, 'valid' => true, 'export_eligible_canonical' => true, 'export_block_codes' => [], 'resolved_ingredient_labels' => array_values(is_array($record['ingredient_labels'] ?? null) ? $record['ingredient_labels'] : []), 'field_checks' => ['recognition_method' => true, 'verification_status' => true, 'ingredient_labels' => true, 'uncertain_labels' => true, 'out_of_scope_labels' => true, 'label_conflicts' => true, 'individual_payload' => true, 'group_payload' => true, 'provenance' => true, 'taxonomy_membership' => true, 'image_inventory_refs' => true, 'image_folder_consistency' => true, 'no_extra_fields' => true]]], 'issues' => []];
+                if (is_string($reportPath)) {
+                    @mkdir(dirname($reportPath), 0777, true);
+                    file_put_contents($reportPath, json_encode($payload));
+                }
+
+                return ['exit_code' => 0, 'stdout' => '{}', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
+            }
+        };
+        $adapter = new B1ValidationAdapter($runner, config('annotation'));
+        $persistence = new class($adapter, new AnnotationArtifactStore) extends AnnotationValidationPersistenceService
+        {
+            public function persistStagedSubmissionAttempt(AnnotationRecord $record, string $submissionIntentId, string $stagedRelativePath, string $stagedSha256, ?int $executedByUserId = null, string $actorType = 'user', ?string $b1Version = null, ?\Closure $withinPhaseBTransaction = null): array
+            {
+                $wrapped = function (AnnotationValidationRun $run, B1ValidationResult $b1Result, AnnotationRecord $stale) use ($withinPhaseBTransaction, $record): void {
+                    if ($withinPhaseBTransaction) {
+                        $withinPhaseBTransaction($run, $b1Result, $stale);
+                    }
+                    DB::table('annotation_records')->where('id', $record->id)->update(['lock_version' => 99, 'updated_at' => now()]);
+                    throw new AnnotationLifecycleConflictException('simulated callback mismatch after mutation');
+                };
+
+                return parent::persistStagedSubmissionAttempt($record, $submissionIntentId, $stagedRelativePath, $stagedSha256, $executedByUserId, $actorType, $b1Version, $wrapped);
+            }
+        };
+        $this->app->instance(AnnotationValidationPersistenceService::class, $persistence);
+
+        try {
+            $service->executeSubmissionIntentValidation($intent->fresh(), $actor, 2);
+            $this->fail('Expected conflict.');
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('mismatch', strtolower($e->getMessage()));
+        }
+
+        $fresh = $record->fresh();
+        $this->assertSame('staging_written', $fresh->submission_state);
+        $this->assertSame(2, $fresh->lock_version);
+        $this->assertDatabaseCount('annotation_validation_runs', 0);
+        $this->assertDatabaseCount('annotation_validation_issues', 0);
+        $this->assertDatabaseMissing('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'validation_completed']);
+        $this->assertDatabaseMissing('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'submission_infra_failed']);
+    }
+
+    public function test_execute_submission_intent_validation_retry_after_od01_preserves_history(): void
+    {
+        $actor = $this->annotationUser();
+        $service = $this->makeService();
+        $record = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-007'), 'rec-c2-007')['record'];
+        $intent1 = $service->createSubmissionIntent($record->fresh(), $actor, 1)['record'];
+        $oldIntentId = $intent1->submission_intent_id;
+        $oldPath = $intent1->submission_staging_path;
+        $this->bindInfraB1Persistence('B1_TIMEOUT', true, null);
+
+        $failed = $service->executeSubmissionIntentValidation($intent1->fresh(), $actor, 2)['record'];
+        $this->assertSame('b1_infra_failed', $failed->submission_state);
+        $this->assertFileExists($this->artifactRoot.'/'.$oldPath);
+
+        $intent2 = $service->createSubmissionIntent($failed->fresh(), $actor, 3)['record'];
+        $this->assertNotSame($oldIntentId, $intent2->submission_intent_id);
+        $this->bindCompletedB1Persistence(true);
+
+        $completed = $service->executeSubmissionIntentValidation($intent2->fresh(), $actor, 4)['record'];
+        $this->assertSame('b1_completed', $completed->submission_state);
+        $this->assertSame(2, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count());
+        $this->assertSame(1, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->where('status', 'infra_failed')->count());
+        $this->assertSame(1, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->where('status', 'completed')->count());
+        $this->assertFileExists($this->artifactRoot.'/'.$oldPath);
+    }
+
+    public function test_execute_submission_intent_validation_rejects_staging_hash_mismatch_and_mismatched_intent_metadata(): void
+    {
+        $actor = $this->annotationUser();
+        $service = $this->makeService();
+        $this->bindCompletedB1Persistence();
+
+        $record = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-008'), 'rec-c2-008')['record'];
+        $intent = $service->createSubmissionIntent($record->fresh(), $actor, 1)['record'];
+        File::put($this->artifactRoot.'/'.$intent->submission_staging_path, '{"tampered":true}'.PHP_EOL);
+        try {
+            $service->executeSubmissionIntentValidation($intent->fresh(), $actor, 2);
+            $this->fail('Expected hash mismatch.');
+        } catch (\Throwable $e) {
+            $this->assertStringContainsString('hash', strtolower($e->getMessage()));
+        }
+        $this->assertSame('staging_written', $record->fresh()->submission_state);
+        $this->assertDatabaseCount('annotation_validation_runs', 0);
+
+        $record2 = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-009'), 'rec-c2-009')['record'];
+        $intent2 = $service->createSubmissionIntent($record2->fresh(), $actor, 1)['record'];
+        $intent2->forceFill(['submission_staging_path' => 'submitted/rec-c2-009/staging/si-other.json'])->save();
+        try {
+            $service->executeSubmissionIntentValidation($intent2->fresh(), $actor, 2);
+            $this->fail('Expected staging path mismatch.');
+        } catch (\Throwable $e) {
+            $this->assertNotSame('', $e->getMessage());
+        }
+        $this->assertSame('staging_written', $record2->fresh()->submission_state);
+    }
+
+    public function test_execute_submission_intent_validation_rejects_no_active_intent_and_wrong_state(): void
+    {
+        $actor = $this->annotationUser();
+        $service = $this->makeService();
+        $this->bindCompletedB1Persistence();
+        $record = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-010'), 'rec-c2-010')['record'];
+        try {
+            $service->executeSubmissionIntentValidation($record->fresh(), $actor, 1);
+            $this->fail();
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('staging_written', $e->getMessage());
+        }
+
+        $record->forceFill(['submission_state' => 'b1_infra_failed'])->save();
+        try {
+            $service->executeSubmissionIntentValidation($record->fresh(), $actor, 1);
+            $this->fail();
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('staging_written', $e->getMessage());
+        }
+    }
+
+    public function test_execute_submission_intent_validation_callback_detects_intent_state_and_lock_mismatch(): void
+    {
+        $actor = $this->annotationUser();
+        $service = $this->makeService();
+        $baseRunner = new class extends B1ProcessRunner
+        {
+            public function run(array $command, string $cwd, int $timeoutSeconds, ?array $env = null): array
+            {
+                $reportPath = null;
+                $recordPath = null;
+                for ($i = 0; $i < count($command); $i++) {
+                    if ($command[$i] === '--out' && isset($command[$i + 1])) {
+                        $reportPath = $command[$i + 1].DIRECTORY_SEPARATOR.'step8b_validation_report.json';
+                    } if ($command[$i] === '--records' && isset($command[$i + 1])) {
+                        $recordPath = $command[$i + 1];
+                    }
+                }
+                $record = is_string($recordPath) && is_file($recordPath) ? json_decode((string) file_get_contents($recordPath), true) : [];
+                $record = is_array($record) ? $record : [];
+                $rid = $record['record_id'] ?? 'rec';
+                $payload = ['schema_version' => 'b1-validation-report-v1', 'summary' => ['records_checked' => 1, 'valid_records' => 1, 'invalid_records' => 0, 'export_eligible_canonical_records' => 1, 'error_count' => 0, 'warning_count' => 0, 'export_block_count' => 0, 'issues_by_code' => []], 'results' => [['record_id' => $rid, 'source' => is_string($recordPath) ? basename($recordPath) : $rid.'.json', 'recognition_method' => $record['recognition_method'] ?? null, 'verification_status' => $record['verification_status'] ?? null, 'valid' => true, 'export_eligible_canonical' => true, 'export_block_codes' => [], 'resolved_ingredient_labels' => array_values(is_array($record['ingredient_labels'] ?? null) ? $record['ingredient_labels'] : []), 'field_checks' => ['recognition_method' => true, 'verification_status' => true, 'ingredient_labels' => true, 'uncertain_labels' => true, 'out_of_scope_labels' => true, 'label_conflicts' => true, 'individual_payload' => true, 'group_payload' => true, 'provenance' => true, 'taxonomy_membership' => true, 'image_inventory_refs' => true, 'image_folder_consistency' => true, 'no_extra_fields' => true]]], 'issues' => []];
+                if (is_string($reportPath)) {
+                    @mkdir(dirname($reportPath), 0777, true);
+                    file_put_contents($reportPath, json_encode($payload));
+                }
+
+                return ['exit_code' => 0, 'stdout' => '{}', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
+            }
+        };
+
+        foreach (['lock', 'intent', 'state'] as $case) {
+            $record = $service->createDraft($actor, $this->validIndividualDraftPayload('rec-c2-011-'.$case), 'rec-c2-011-'.$case)['record'];
+            $intent = $service->createSubmissionIntent($record->fresh(), $actor, 1)['record'];
+            $adapter = new B1ValidationAdapter($baseRunner, config('annotation'));
+            $persistence = new class($adapter, new AnnotationArtifactStore, $case, $record->id) extends AnnotationValidationPersistenceService
+            {
+                public function __construct(B1ValidationAdapter $a, AnnotationArtifactStore $s, private string $case, private int $recordId)
+                {
+                    parent::__construct($a, $s);
+                }
+
+                public function persistStagedSubmissionAttempt(AnnotationRecord $record, string $submissionIntentId, string $stagedRelativePath, string $stagedSha256, ?int $executedByUserId = null, string $actorType = 'user', ?string $b1Version = null, ?\Closure $withinPhaseBTransaction = null): array
+                {
+                    $wrapped = function (AnnotationValidationRun $run, B1ValidationResult $b1Result, AnnotationRecord $stale) use ($withinPhaseBTransaction): void {
+                        if ($this->case === 'lock') {
+                            DB::table('annotation_records')->where('id', $this->recordId)->update(['lock_version' => 99, 'updated_at' => now()]);
+                        }
+                        if ($this->case === 'intent') {
+                            DB::table('annotation_records')->where('id', $this->recordId)->update(['submission_intent_id' => 'si-other', 'updated_at' => now()]);
+                        }
+                        if ($this->case === 'state') {
+                            DB::table('annotation_records')->where('id', $this->recordId)->update(['submission_state' => 'b1_completed', 'updated_at' => now()]);
+                        }
+                        if ($withinPhaseBTransaction) {
+                            $withinPhaseBTransaction($run, $b1Result, $stale);
+                        }
+                    };
+
+                    return parent::persistStagedSubmissionAttempt($record, $submissionIntentId, $stagedRelativePath, $stagedSha256, $executedByUserId, $actorType, $b1Version, $wrapped);
+                }
+            };
+            $this->app->instance(AnnotationValidationPersistenceService::class, $persistence);
+            try {
+                $service->executeSubmissionIntentValidation($intent->fresh(), $actor, 2);
+                $this->fail('Expected conflict for '.$case);
+            } catch (AnnotationLifecycleConflictException $e) {
+                $this->assertNotSame('', $e->getMessage());
+            }
+            $fresh = $record->fresh();
+            $this->assertDatabaseCount('annotation_validation_runs', 0);
+            $this->assertDatabaseMissing('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'validation_completed']);
+            $this->assertDatabaseMissing('annotation_review_actions', ['annotation_record_id' => $record->id, 'action' => 'submission_infra_failed']);
+            // restore intent/state/lock for isolation checks not needed; new record per case
+            $this->assertNotNull($fresh->id);
+        }
+    }
+
+    private function configureB1AdapterConfig(): void
+    {
+        $base = storage_path('framework/testing/b1-lifecycle-'.uniqid('', true));
+        File::ensureDirectoryExists($base);
+        foreach (['script.py', 'schema.json', 'inventory.csv', 'taxonomy.json', 'decisions.json'] as $f) {
+            File::put($base.'/'.$f, '{}');
+        }
+        config([
+            'annotation.b1_python_bin' => 'python',
+            'annotation.b1_script_path' => $base.'/script.py',
+            'annotation.b1_schema_path' => $base.'/schema.json',
+            'annotation.b1_inventory_path' => $base.'/inventory.csv',
+            'annotation.b1_taxonomy_path' => $base.'/taxonomy.json',
+            'annotation.b1_decisions_path' => $base.'/decisions.json',
+            'annotation.b1_timeout_seconds' => 60,
+            'annotation.b1_workdir' => base_path('..'),
+            'annotation.b1_temp_dir' => $base.'/tmp',
+        ]);
+    }
+
+    private function bindCompletedB1Persistence(bool $valid = true, array $errors = [], array $warnings = [], ?string $b1Version = 'b1-test'): AnnotationValidationPersistenceService
+    {
+        $this->configureB1AdapterConfig();
+        $runner = new class($valid, $errors, $warnings, $b1Version) extends B1ProcessRunner
+        {
+            /** @param list<array<string,mixed>> $errors @param list<array<string,mixed>> $warnings */
+            public function __construct(private bool $valid, private array $errors, private array $warnings, private ?string $b1Version) {}
+
+            public function run(array $command, string $cwd, int $timeoutSeconds, ?array $env = null): array
+            {
+                if (in_array('--version', $command, true) || in_array('-c', $command, true)) {
+                    return ['exit_code' => 0, 'stdout' => 'ok', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
+                }
+                $reportPath = null;
+                $recordPath = null;
+                for ($i = 0; $i < count($command); $i++) {
+                    if (($command[$i] === '--out' || $command[$i] === '--out-dir') && isset($command[$i + 1])) {
+                        $reportPath = $command[$i + 1].DIRECTORY_SEPARATOR.'step8b_validation_report.json';
+                    }
+                    if ($command[$i] === '--records' && isset($command[$i + 1])) {
+                        $recordPath = $command[$i + 1];
+                    }
+                }
+                $record = is_string($recordPath) && is_file($recordPath) ? json_decode((string) file_get_contents($recordPath), true) : [];
+                $record = is_array($record) ? $record : [];
+                $recordId = $record['record_id'] ?? 'rec-unknown';
+                $issues = $this->errors;
+                foreach ($issues as &$issue) {
+                    if (is_array($issue) && ! array_key_exists('record_id', $issue)) {
+                        $issue['record_id'] = $recordId;
+                    }
+                }
+                unset($issue);
+                $payload = [
+                    'schema_version' => 'b1-validation-report-v1',
+                    'summary' => [
+                        'records_checked' => 1,
+                        'valid_records' => $this->valid ? 1 : 0,
+                        'invalid_records' => $this->valid ? 0 : 1,
+                        'export_eligible_canonical_records' => $this->valid ? 1 : 0,
+                        'error_count' => count($this->errors),
+                        'warning_count' => count($this->warnings),
+                        'export_block_count' => $this->valid ? 0 : count($this->errors),
+                        'issues_by_code' => [],
+                    ],
+                    'results' => [[
+                        'record_id' => $recordId,
+                        'source' => is_string($recordPath) ? basename($recordPath) : $recordId.'.json',
+                        'recognition_method' => $record['recognition_method'] ?? null,
+                        'verification_status' => $record['verification_status'] ?? null,
+                        'valid' => $this->valid,
+                        'export_eligible_canonical' => $this->valid,
+                        'export_block_codes' => $this->valid ? [] : ['ERR_X'],
+                        'resolved_ingredient_labels' => array_values(is_array($record['ingredient_labels'] ?? null) ? $record['ingredient_labels'] : []),
+                        'field_checks' => ['recognition_method' => true, 'verification_status' => true, 'ingredient_labels' => true, 'uncertain_labels' => true, 'out_of_scope_labels' => true, 'label_conflicts' => true, 'individual_payload' => true, 'group_payload' => true, 'provenance' => true, 'taxonomy_membership' => true, 'image_inventory_refs' => true, 'image_folder_consistency' => true, 'no_extra_fields' => true],
+                    ]],
+                    'issues' => array_values($issues),
+                ];
+                if (is_string($reportPath)) {
+                    @mkdir(dirname($reportPath), 0777, true);
+                    file_put_contents($reportPath, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                }
+
+                return ['exit_code' => $this->valid ? 0 : 1, 'stdout' => '{}', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
+            }
+        };
+
+        $adapter = new B1ValidationAdapter($runner, config('annotation'));
+        $service = new AnnotationValidationPersistenceService($adapter, new AnnotationArtifactStore);
+        $this->app->instance(AnnotationValidationPersistenceService::class, $service);
+
+        return $service;
+    }
+
+    private function bindInfraB1Persistence(string $code = 'B1_PROCESS_FAILED', bool $timedOut = false, ?int $exitCode = 2): AnnotationValidationPersistenceService
+    {
+        $this->configureB1AdapterConfig();
+        $runner = new class($code, $timedOut, $exitCode) extends B1ProcessRunner
+        {
+            public function __construct(private string $code, private bool $timedOut, private ?int $exitCode) {}
+
+            public function run(array $command, string $cwd, int $timeoutSeconds, ?array $env = null): array
+            {
+                if (in_array('--version', $command, true) || (in_array('-c', $command, true))) {
+                    return ['exit_code' => 0, 'stdout' => 'ok', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
+                }
+
+                return ['exit_code' => $this->exitCode, 'stdout' => '', 'stderr' => $this->code, 'timed_out' => $this->timedOut, 'duration_ms' => 5];
+            }
+        };
+
+        $adapter = new B1ValidationAdapter($runner, config('annotation'));
+        $service = new AnnotationValidationPersistenceService($adapter, new AnnotationArtifactStore);
+        $this->app->instance(AnnotationValidationPersistenceService::class, $service);
+
+        return $service;
     }
 }
