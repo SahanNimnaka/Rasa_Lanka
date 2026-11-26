@@ -20,4 +20,16 @@ return [
     'registry_cache_ttl_seconds' => (int) env('ANNOTATION_REGISTRY_CACHE_TTL_SECONDS', 30),
     'registry_inventory_default_per_page' => 25,
     'registry_inventory_max_per_page' => 100,
+
+    // B2-S2-I4 protected local artifact storage (metadata/filesystem only; no DB lifecycle).
+    'annotation_storage_disk' => env('ANNOTATION_STORAGE_DISK', 'annotation'),
+    'annotation_storage_driver' => env('ANNOTATION_STORAGE_DRIVER', 'local'),
+    'annotation_artifact_root' => env('ANNOTATION_ARTIFACT_ROOT', storage_path('app/private/annotation-artifacts')),
+    'annotation_draft_versions_path' => env('ANNOTATION_DRAFT_VERSIONS_PATH', 'drafts'),
+    'annotation_submitted_path' => env('ANNOTATION_SUBMITTED_PATH', 'submitted'),
+    'annotation_validation_report_path' => env('ANNOTATION_VALIDATION_REPORT_PATH', 'validation-runs'),
+    'annotation_temp_path' => env('ANNOTATION_TEMP_PATH', 'tmp'),
+    'annotation_draft_retention_grace_days' => (int) env('ANNOTATION_DRAFT_RETENTION_GRACE_DAYS', 30),
+    'annotation_retention_days' => (int) env('ANNOTATION_RETENTION_DAYS', 0),
+    'annotation_promotion_lock_wait_seconds' => (int) env('ANNOTATION_PROMOTION_LOCK_WAIT_SECONDS', 5),
 ];

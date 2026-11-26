@@ -38,6 +38,14 @@ return [
             'report' => false,
         ],
 
+        'annotation' => [
+            'driver' => 'local',
+            'root' => env('ANNOTATION_ARTIFACT_ROOT', storage_path('app/private/annotation-artifacts')),
+            'serve' => false,
+            'throw' => true,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
