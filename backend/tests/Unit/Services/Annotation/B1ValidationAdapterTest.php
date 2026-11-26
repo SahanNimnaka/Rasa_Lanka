@@ -46,7 +46,7 @@ class B1ValidationAdapterTest extends TestCase
     public function test_missing_script_returns_503_result(): void
     {
         config(['annotation.b1_script_path' => base_path('../missing-script.py')]);
-        $adapter = new B1ValidationAdapter(new B1ProcessRunner(), config('annotation'));
+        $adapter = new B1ValidationAdapter(new B1ProcessRunner, config('annotation'));
         $result = $adapter->validateRecord(['record_id' => 'R1']);
         $this->assertSame(503, $result->httpStatus);
         $this->assertSame('B1_SCRIPT_MISSING', $result->payload['infrastructure_error']['code']);
@@ -62,6 +62,7 @@ class B1ValidationAdapterTest extends TestCase
             $outDir = $command[array_search('--out-dir', $command, true) + 1];
             File::ensureDirectoryExists($outDir);
             File::put($outDir.DIRECTORY_SEPARATOR.'step8b_validation_report.json', '{not-json');
+
             return ['exit_code' => 0, 'stdout' => '', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
         });
         $adapter = new B1ValidationAdapter($runner, config('annotation'));
@@ -77,6 +78,7 @@ class B1ValidationAdapterTest extends TestCase
             if (in_array('--version', $command, true) || in_array('-c', $command, true)) {
                 return ['exit_code' => 0, 'stdout' => 'ok', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
             }
+
             return ['exit_code' => null, 'stdout' => '', 'stderr' => '', 'timed_out' => true, 'duration_ms' => 60000];
         });
         $adapter = new B1ValidationAdapter($runner, config('annotation'));
@@ -99,6 +101,7 @@ class B1ValidationAdapterTest extends TestCase
                 'results' => [['record_id' => 'R1', 'recognition_method' => 'individual', 'verification_status' => 'confirmed', 'valid' => false, 'export_eligible_canonical' => false, 'export_block_codes' => [], 'resolved_ingredient_labels' => []]],
                 'issues' => [['severity' => 'error', 'code' => 'E-SCHEMA', 'record_id' => 'R1', 'image_id' => '', 'field' => 'x', 'message' => 'bad', 'details' => []]],
             ]));
+
             return ['exit_code' => 1, 'stdout' => '', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
         });
         $adapter = new B1ValidationAdapter($runner, config('annotation'));
@@ -114,11 +117,51 @@ class B1ValidationAdapterTest extends TestCase
             if (in_array('--version', $command, true) || in_array('-c', $command, true)) {
                 return ['exit_code' => 0, 'stdout' => 'ok', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
             }
+
             return ['exit_code' => 2, 'stdout' => '', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
         });
         $adapter = new B1ValidationAdapter($runner, config('annotation'));
         $result = $adapter->validateRecord(['record_id' => 'R1']);
         $this->assertSame(503, $result->httpStatus);
         $this->assertSame('B1_PROCESS_FAILED', $result->payload['infrastructure_error']['code']);
+    }
+
+    public function test_path_based_validation_uses_exact_staged_file_and_preserves_raw_reports(): void
+    {
+        $stagedPath = storage_path('app/b1-adapter-unit-tests/staged/record.json');
+        File::ensureDirectoryExists(dirname($stagedPath));
+        $original = '{"record_id":"R1","exact":true}';
+        File::put($stagedPath, $original);
+
+        $runner = $this->mock(B1ProcessRunner::class);
+        $runner->shouldReceive('run')->andReturnUsing(function (array $command) use ($stagedPath) {
+            if (in_array('--version', $command, true) || in_array('-c', $command, true)) {
+                return ['exit_code' => 0, 'stdout' => 'ok', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 1];
+            }
+            $recordsIndex = array_search('--records', $command, true);
+            $this->assertSame($stagedPath, $command[$recordsIndex + 1]);
+            $outDir = $command[array_search('--out-dir', $command, true) + 1];
+            File::ensureDirectoryExists($outDir);
+            $report = json_encode([
+                'summary' => ['records_checked' => 1, 'valid_records' => 1, 'invalid_records' => 0, 'export_eligible_canonical_records' => 1, 'error_count' => 0, 'warning_count' => 0, 'export_block_count' => 0, 'issues_by_code' => []],
+                'results' => [['record_id' => 'R1', 'recognition_method' => 'individual', 'verification_status' => 'confirmed', 'valid' => true, 'export_eligible_canonical' => true, 'export_block_codes' => [], 'resolved_ingredient_labels' => ['ginger']]],
+                'issues' => [],
+            ]);
+            File::put($outDir.DIRECTORY_SEPARATOR.'step8b_validation_report.json', $report);
+            File::put($outDir.DIRECTORY_SEPARATOR.'step8b_validation_issues.csv', "severity,code\n");
+
+            return ['exit_code' => 0, 'stdout' => '', 'stderr' => '', 'timed_out' => false, 'duration_ms' => 5];
+        });
+
+        $adapter = new B1ValidationAdapter($runner, config('annotation'));
+        $out = $adapter->validateStagedArtifactWithReport($stagedPath, 'run-fixed');
+
+        $this->assertSame(200, $out['result']->httpStatus);
+        $this->assertSame('run-fixed', $out['run_id']);
+        $this->assertStringContainsString('"R1"', (string) $out['report_json']);
+        $this->assertStringContainsString('severity,code', (string) $out['report_csv']);
+        $this->assertFileExists($stagedPath);
+        $this->assertSame($original, File::get($stagedPath));
+        $this->assertDirectoryDoesNotExist(storage_path('app/b1-adapter-unit-tests/run-fixed'));
     }
 }

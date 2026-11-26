@@ -90,3 +90,12 @@ The importer retains source provenance, category conflicts, and each original in
 The `data_quality_issues` table stores each audit CSV record, including its file and row, raw entity reference, severity, issue type, description, recommended action, and a resolution status that defaults to `unresolved`. Recipe and ingredient references are linked where they resolve to stable records. Re-imports update source details without resetting a previously changed resolution status. A field name is populated only when the issue identifies one unambiguous field; otherwise it remains `NULL`.
 
 PostgreSQL integration tests are opt-in and require `RASALANKA_TEST_PG_DATABASE` to name an isolated database beginning with `rasalanka_test_`. They migrate only that database. The additive recipe-quantity/label and data-quality migrations must be applied to the target database before committing an import. Review the dry-run report before any explicit commit.
+
+## Annotation/S2 database support
+
+- **PostgreSQL**: supported production database for annotation/S2.
+- **MySQL**: supported production database for annotation/S2.
+- **SQLite**: supported for development and testing.
+- **SQL Server (`sqlsrv`)**: **not supported** for annotation/S2.
+
+Laravel's default `sqlsrv` connection configuration does not imply annotation/S2 support. The I5 additive migration `2026_11_26_000008_add_unique_attempt_index_to_annotation_validation_runs_table.php` enforces this policy: on `sqlsrv` it fails clearly before any schema mutation and does not create the unique validation-attempt index. The I5 unique-attempt index for `(annotation_record_id, submission_intent_id)` relies on approved database semantics for supported drivers (PostgreSQL/MySQL production; SQLite dev/test). Runtime validation evidence in this workspace is SQLite-based unless separately documented.

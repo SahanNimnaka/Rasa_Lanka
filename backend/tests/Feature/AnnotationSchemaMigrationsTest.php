@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -278,6 +280,10 @@ class AnnotationSchemaMigrationsTest extends TestCase
 
         $this->assertTrue(Schema::hasIndex('annotation_records', ['record_id'], 'unique'));
         $this->assertTrue(Schema::hasIndex('annotation_records', ['submitted_json_path'], 'unique'));
+        $this->assertTrue(
+            Schema::hasIndex('annotation_validation_runs', ['annotation_record_id', 'submission_intent_id'], 'unique'),
+            'Missing unique attempt index on annotation_validation_runs(annotation_record_id, submission_intent_id)'
+        );
         $this->assertTrue(Schema::hasIndex('annotation_validation_runs', ['run_id'], 'unique'));
         $this->assertTrue(Schema::hasIndex(
             'annotation_record_images',
@@ -535,7 +541,7 @@ class AnnotationSchemaMigrationsTest extends TestCase
 
         $this->artisan('migrate:rollback', [
             '--database' => $this->schemaTestConnection,
-            '--step' => 7,
+            '--step' => 8,
             '--force' => true,
         ])->assertExitCode(0);
 
@@ -719,5 +725,62 @@ class AnnotationSchemaMigrationsTest extends TestCase
         }
 
         $this->fail('Expected the database to reject the invalid or restricted operation.');
+    }
+
+    public function test_i5_attempt_unique_migration_guards_sqlsrv_before_schema_mutation(): void
+    {
+        $migration = require base_path('database/migrations/2026_11_26_000008_add_unique_attempt_index_to_annotation_validation_runs_table.php');
+
+        $originalSchema = Schema::getFacadeRoot();
+        $schemaSpy = \Mockery::spy(Builder::class);
+        Schema::swap($schemaSpy);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $migration->driverNameOverride = 'sqlsrv';
+
+        try {
+            $migration->up();
+            $this->fail('Expected RuntimeException for sqlsrv guard.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame(
+                'SQL Server (sqlsrv) is not supported for RasaLanka annotation/S2. '
+                .'Supported databases: PostgreSQL and MySQL for production; SQLite for development/testing. '
+                .'This migration adds the I5 unique validation-attempt index and will not mutate schema on sqlsrv.',
+                $e->getMessage()
+            );
+        } finally {
+            $migration->driverNameOverride = null;
+            Schema::swap($originalSchema);
+        }
+
+        $schemaSpy->shouldNotHaveReceived('table');
+        $schemaSpy->shouldNotHaveReceived('create');
+        $schemaSpy->shouldNotHaveReceived('drop');
+        $schemaSpy->shouldNotHaveReceived('dropIfExists');
+
+        $queryLog = DB::getQueryLog();
+        DB::disableQueryLog();
+        DB::flushQueryLog();
+        $this->assertSame([], $queryLog, 'Duplicate-preflight query must not run on sqlsrv guard path.');
+
+        $this->assertTrue(
+            Schema::hasIndex('annotation_validation_runs', ['annotation_record_id', 'submission_intent_id'], 'unique'),
+            'SQLite unique attempt index should still exist after real migration sqlsrv guard throw.'
+        );
+    }
+
+    public function test_i5_attempt_unique_migration_down_is_safe_when_index_absent(): void
+    {
+        $migration = require base_path('database/migrations/2026_11_26_000008_add_unique_attempt_index_to_annotation_validation_runs_table.php');
+        $migration->down();
+        $migration->down();
+        $this->assertFalse(
+            Schema::hasIndex('annotation_validation_runs', ['annotation_record_id', 'submission_intent_id'], 'unique')
+        );
+        $migration->up();
+        $this->assertTrue(
+            Schema::hasIndex('annotation_validation_runs', ['annotation_record_id', 'submission_intent_id'], 'unique')
+        );
     }
 }

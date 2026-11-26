@@ -41,6 +41,8 @@ class AnnotationArtifactStore
 
     private string $submittedPath;
 
+    private string $validationReportsPath;
+
     private string $tempPath;
 
     private int $lockWaitSeconds;
@@ -56,6 +58,7 @@ class AnnotationArtifactStore
         $this->driver = strtolower($this->stringConfig($config, 'annotation_storage_driver', 'local'));
         $this->draftsPath = $this->normalizeRelativeConfigPath($config, 'annotation_draft_versions_path', 'drafts');
         $this->submittedPath = $this->normalizeRelativeConfigPath($config, 'annotation_submitted_path', 'submitted');
+        $this->validationReportsPath = $this->normalizeRelativeConfigPath($config, 'annotation_validation_report_path', 'validation-runs');
         $this->tempPath = $this->normalizeRelativeConfigPath($config, 'annotation_temp_path', 'tmp');
         $this->lockWaitSeconds = max(0, (int) ($config['annotation_promotion_lock_wait_seconds'] ?? 5));
 
@@ -355,6 +358,111 @@ class AnnotationArtifactStore
     }
 
     /**
+     * Resolve a store-relative path to an absolute path under the protected root.
+     * This does not expose arbitrary filesystem access outside the annotation root.
+     */
+    public function resolveRelativePath(string $relativePath, bool $mustExist = true): string
+    {
+        return $this->absolutePathForRelative($relativePath, $mustExist);
+    }
+
+    /**
+     * @return array{record_id:string,run_id:string,file_name:string,relative_path:string,sha256:string,bytes:int,idempotent:bool}
+     */
+    public function writeValidationReport(string $recordId, string $runId, string $fileName, string $content): array
+    {
+        $recordId = $this->assertIdentifier($recordId, 'record_id');
+        $runId = $this->assertIdentifier($runId, 'run_id');
+        $fileName = $this->assertReportFileName($fileName);
+
+        $relative = $this->validationReportRelativePath($recordId, $runId, $fileName);
+        $absolute = $this->absolutePathForRelative($relative, false);
+        $this->ensureDirectory(dirname($absolute));
+
+        if (file_exists($absolute)) {
+            $existingSha = $this->hashFile($absolute);
+            $newSha = hash('sha256', $content);
+            if (! hash_equals($existingSha, $newSha)) {
+                throw new ArtifactIntegrityConflictException('Validation report artifact exists with different bytes.');
+            }
+
+            return [
+                'record_id' => $recordId,
+                'run_id' => $runId,
+                'file_name' => $fileName,
+                'relative_path' => $relative,
+                'sha256' => $existingSha,
+                'bytes' => filesize($absolute) ?: 0,
+                'idempotent' => true,
+            ];
+        }
+
+        $tmpRelative = $this->validationReportsPath.'/'.$recordId.'/'.$runId.'/.tmp-'.$this->generateIdentifier().'-'.$fileName;
+        $tmpAbsolute = $this->absolutePathForRelative($tmpRelative, false);
+        $this->ensureDirectory(dirname($tmpAbsolute));
+
+        try {
+            $this->writeFileExclusive($tmpAbsolute, $content);
+            $sha256 = $this->hashFile($tmpAbsolute);
+            $this->publishExclusiveByHardLink($tmpAbsolute, $absolute);
+            $this->syncDirectory(dirname($absolute));
+
+            return [
+                'record_id' => $recordId,
+                'run_id' => $runId,
+                'file_name' => $fileName,
+                'relative_path' => $relative,
+                'sha256' => $sha256,
+                'bytes' => strlen($content),
+                'idempotent' => false,
+            ];
+        } catch (ArtifactAlreadyExistsException $e) {
+            try {
+                $this->cleanupTempFile($tmpAbsolute);
+            } catch (\Throwable $cleanupError) {
+                throw new ArtifactStorageException('Validation report artifact already exists; temp cleanup failed.', 0, $cleanupError);
+            }
+            $existingSha = $this->hashFile($absolute);
+            $newSha = hash('sha256', $content);
+            if (! hash_equals($existingSha, $newSha)) {
+                throw new ArtifactIntegrityConflictException('Validation report artifact exists with different bytes.', 0, $e);
+            }
+
+            return [
+                'record_id' => $recordId,
+                'run_id' => $runId,
+                'file_name' => $fileName,
+                'relative_path' => $relative,
+                'sha256' => $existingSha,
+                'bytes' => filesize($absolute) ?: 0,
+                'idempotent' => true,
+            ];
+        } catch (\Throwable $e) {
+            try {
+                $this->cleanupTempFile($tmpAbsolute);
+            } catch (\Throwable $cleanupError) {
+                if ($e instanceof ArtifactStorageException) {
+                    throw $e;
+                }
+                throw new ArtifactStorageException('Failed to write validation report artifact; temp cleanup also failed.', 0, $cleanupError);
+            }
+            if ($e instanceof ArtifactStorageException) {
+                throw $e;
+            }
+            throw new ArtifactStorageException('Failed to write validation report artifact.', 0, $e);
+        }
+    }
+
+    public function validationReportRelativePath(string $recordId, string $runId, string $fileName = 'step8b_validation_report.json'): string
+    {
+        $recordId = $this->assertIdentifier($recordId, 'record_id');
+        $runId = $this->assertIdentifier($runId, 'run_id');
+        $fileName = $this->assertReportFileName($fileName);
+
+        return $this->validationReportsPath.'/'.$recordId.'/'.$runId.'/'.$fileName;
+    }
+
+    /**
      * Reconciliation hook: inspect record artifacts without mutation.
      *
      * @return array<string,mixed>
@@ -491,6 +599,15 @@ class AnnotationArtifactStore
         }
 
         return $value;
+    }
+
+    private function assertReportFileName(string $fileName): string
+    {
+        if (preg_match('/\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z/', $fileName) !== 1 || str_contains($fileName, '..')) {
+            throw new ArtifactPathException('Invalid report file name.');
+        }
+
+        return $fileName;
     }
 
     private function assertHashesMatch(string $actual, string $expected, string $message): void

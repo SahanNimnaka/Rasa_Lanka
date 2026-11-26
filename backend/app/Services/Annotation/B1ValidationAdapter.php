@@ -9,11 +9,12 @@ use Illuminate\Support\Str;
 class B1ValidationAdapter
 {
     private const REPORT_FILENAME = 'step8b_validation_report.json';
+
     private const MAX_RECORD_BYTES = 1048576; // 1 MiB
 
     public function __construct(?B1ProcessRunner $runner = null, ?array $config = null)
     {
-        $this->runner = $runner ?? new B1ProcessRunner();
+        $this->runner = $runner ?? new B1ProcessRunner;
         $this->config = $config ?? config('annotation');
     }
 
@@ -49,6 +50,7 @@ class B1ValidationAdapter
             $preflight = $this->preflight();
             if ($preflight !== null) {
                 $this->logFailure($runId, $preflight['code'], $preflight['message'], null);
+
                 return B1ValidationResult::infrastructureFailure($this->infraPayload($runId, $preflight['code'], $preflight['message']));
             }
 
@@ -62,18 +64,21 @@ class B1ValidationAdapter
 
             if ($result['timed_out']) {
                 $this->logFailure($runId, 'B1_TIMEOUT', 'B1 validation timed out.', $result);
+
                 return B1ValidationResult::infrastructureFailure($this->infraPayload($runId, 'B1_TIMEOUT', 'The B1 validator timed out.', $result));
             }
 
             $exitCode = $result['exit_code'];
             if ($exitCode !== 0 && $exitCode !== 1) {
                 $this->logFailure($runId, 'B1_PROCESS_FAILED', 'B1 process exited unexpectedly.', $result);
+
                 return B1ValidationResult::infrastructureFailure($this->infraPayload($runId, 'B1_PROCESS_FAILED', 'The B1 validator exited unexpectedly.', $result));
             }
 
             $reportPath = $outDir.DIRECTORY_SEPARATOR.self::REPORT_FILENAME;
             if (! is_file($reportPath) || is_link($reportPath)) {
                 $this->logFailure($runId, 'B1_REPORT_MISSING', 'B1 report missing.', $result);
+
                 return B1ValidationResult::infrastructureFailure($this->infraPayload($runId, 'B1_REPORT_MISSING', 'The B1 validator did not produce a report.', $result));
             }
 
@@ -81,6 +86,7 @@ class B1ValidationAdapter
             $report = json_decode($reportRaw, true);
             if (! $this->isValidReport($report)) {
                 $this->logFailure($runId, 'B1_REPORT_CORRUPT', 'B1 report corrupt.', $result);
+
                 return B1ValidationResult::infrastructureFailure($this->infraPayload($runId, 'B1_REPORT_CORRUPT', 'The B1 validator report could not be parsed.', $result));
             }
 
@@ -123,10 +129,133 @@ class B1ValidationAdapter
             ]);
         } catch (\Throwable $e) {
             Log::error('b1.validation.exception', ['run_id' => $runId, 'error_code' => 'B1_ADAPTER_EXCEPTION']);
+
             return B1ValidationResult::infrastructureFailure($this->infraPayload($runId, 'B1_ADAPTER_EXCEPTION', 'The B1 validator could not be executed.'));
         } finally {
             $this->cleanup($runDir, $tempBase);
         }
+    }
+
+    /**
+     * Narrow path-based B1 validation for exact staged artifacts.
+     * Preserves payload-based validateRecord() behavior; does not delete caller-owned input.
+     *
+     * @return array{result:B1ValidationResult,run_id:string,report_json:?string,report_csv:?string,report_summary_md:?string}
+     */
+    public function validateStagedArtifactWithReport(string $stagedAbsolutePath, ?string $runId = null): array
+    {
+        $runId = $this->normalizeRunId($runId);
+        $tempBase = $this->resolvePath($this->configPath('b1_temp_dir'));
+        $runDir = $tempBase.DIRECTORY_SEPARATOR.$runId;
+        $outDir = $runDir.DIRECTORY_SEPARATOR.'out';
+
+        try {
+            $this->assertSafeRunDir($tempBase, $runDir);
+            File::ensureDirectoryExists($outDir);
+
+            if ($stagedAbsolutePath === '' || ! is_file($stagedAbsolutePath) || is_link($stagedAbsolutePath)) {
+                return $this->stagedInfra($runId, 'B1_INPUT_MISSING', 'The staged validation artifact is unavailable.', null);
+            }
+
+            $preflight = $this->preflight();
+            if ($preflight !== null) {
+                $this->logFailure($runId, $preflight['code'], $preflight['message'], null);
+
+                return $this->stagedInfra($runId, $preflight['code'], $preflight['message'], null);
+            }
+
+            $command = $this->buildCommand($stagedAbsolutePath, $outDir);
+            $result = $this->runner->run(
+                $command,
+                $this->resolvePath($this->configPath('b1_workdir')),
+                max(1, (int) $this->configPath('b1_timeout_seconds')),
+                $this->processEnv()
+            );
+
+            if ($result['timed_out']) {
+                $this->logFailure($runId, 'B1_TIMEOUT', 'B1 validation timed out.', $result);
+
+                return $this->stagedInfra($runId, 'B1_TIMEOUT', 'The B1 validator timed out.', $result);
+            }
+
+            $exitCode = $result['exit_code'];
+            if ($exitCode !== 0 && $exitCode !== 1) {
+                $this->logFailure($runId, 'B1_PROCESS_FAILED', 'B1 process exited unexpectedly.', $result);
+
+                return $this->stagedInfra($runId, 'B1_PROCESS_FAILED', 'The B1 validator exited unexpectedly.', $result);
+            }
+
+            $reportPath = $outDir.DIRECTORY_SEPARATOR.self::REPORT_FILENAME;
+            if (! is_file($reportPath) || is_link($reportPath)) {
+                $this->logFailure($runId, 'B1_REPORT_MISSING', 'B1 report missing.', $result);
+
+                return $this->stagedInfra($runId, 'B1_REPORT_MISSING', 'The B1 validator did not produce a report.', $result);
+            }
+
+            $reportRaw = File::get($reportPath);
+            $report = json_decode($reportRaw, true);
+            if (! $this->isValidReport($report)) {
+                $this->logFailure($runId, 'B1_REPORT_CORRUPT', 'B1 report corrupt.', $result);
+
+                return $this->stagedInfra($runId, 'B1_REPORT_CORRUPT', 'The B1 validator report could not be parsed.', $result);
+            }
+
+            $summary = $report['summary'];
+            $results = $report['results'];
+            $issues = $report['issues'];
+            $recordResult = $this->selectRecordResultFromPath($results, $stagedAbsolutePath);
+            $recordId = is_string($recordResult['record_id'] ?? null) ? $recordResult['record_id'] : null;
+
+            Log::info('b1.validation.completed', [
+                'run_id' => $runId,
+                'record_id' => $recordId,
+                'exit_code' => $exitCode,
+                'duration_ms' => $result['duration_ms'],
+                'error_count' => $summary['error_count'] ?? null,
+                'warning_count' => $summary['warning_count'] ?? null,
+                'export_block_count' => $summary['export_block_count'] ?? null,
+                'staged_input' => true,
+            ]);
+
+            return [
+                'run_id' => $runId,
+                'result' => B1ValidationResult::success([
+                    'run_id' => $runId,
+                    'b1' => [
+                        'valid' => (bool) ($recordResult['valid'] ?? false),
+                        'export_eligible_canonical' => (bool) ($recordResult['export_eligible_canonical'] ?? false),
+                        'error_count' => (int) ($summary['error_count'] ?? 0),
+                        'warning_count' => (int) ($summary['warning_count'] ?? 0),
+                        'export_block_count' => (int) ($summary['export_block_count'] ?? 0),
+                        'export_block_codes' => array_values(is_array($recordResult['export_block_codes'] ?? null) ? $recordResult['export_block_codes'] : []),
+                        'issues' => $this->normalizeIssues($issues),
+                        'results' => $this->normalizeResults($results),
+                        'summary' => [
+                            'records_checked' => (int) ($summary['records_checked'] ?? 0),
+                            'valid_records' => (int) ($summary['valid_records'] ?? 0),
+                            'invalid_records' => (int) ($summary['invalid_records'] ?? 0),
+                            'export_eligible_canonical_records' => (int) ($summary['export_eligible_canonical_records'] ?? 0),
+                            'issues_by_code' => is_array($summary['issues_by_code'] ?? null) ? $summary['issues_by_code'] : [],
+                        ],
+                        'exit_code' => $exitCode,
+                    ],
+                ]),
+                'report_json' => $reportRaw,
+                'report_csv' => $this->readOptionalReportFile($outDir.DIRECTORY_SEPARATOR.'step8b_validation_issues.csv'),
+                'report_summary_md' => $this->readOptionalReportFile($outDir.DIRECTORY_SEPARATOR.'step8b_validation_summary.md'),
+            ];
+        } catch (\Throwable $e) {
+            Log::error('b1.validation.exception', ['run_id' => $runId, 'error_code' => 'B1_ADAPTER_EXCEPTION', 'staged_input' => true]);
+
+            return $this->stagedInfra($runId, 'B1_ADAPTER_EXCEPTION', 'The B1 validator could not be executed.', null);
+        } finally {
+            $this->cleanup($runDir, $tempBase);
+        }
+    }
+
+    public function validateStagedArtifact(string $stagedAbsolutePath, ?string $runId = null): B1ValidationResult
+    {
+        return $this->validateStagedArtifactWithReport($stagedAbsolutePath, $runId)['result'];
     }
 
     /**
@@ -135,6 +264,7 @@ class B1ValidationAdapter
     public function healthCheck(): array
     {
         $preflight = $this->preflight();
+
         return [
             'ok' => $preflight === null,
             'python_bin' => basename($this->configPath('b1_python_bin')),
@@ -207,12 +337,14 @@ class B1ValidationAdapter
                 $env[$key] = $value;
             }
         }
+
         return $env;
     }
 
     private function configPath(string $key): string
     {
         $value = $this->config[$key] ?? '';
+
         return is_string($value) ? $value : '';
     }
 
@@ -226,6 +358,7 @@ class B1ValidationAdapter
         }
         $workdir = $this->configPath('b1_workdir');
         $base = $workdir !== '' ? $workdir : base_path('..');
+
         return rtrim($base, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
     }
 
@@ -234,6 +367,7 @@ class B1ValidationAdapter
         if (is_string($runId) && preg_match('/\A[A-Za-z0-9][A-Za-z0-9_-]{0,127}\z/', $runId) === 1) {
             return $runId;
         }
+
         return (string) Str::uuid();
     }
 
@@ -298,6 +432,7 @@ class B1ValidationAdapter
             }
         }
         $first = $results[0] ?? null;
+
         return is_array($first) ? $first : [];
     }
 
@@ -311,6 +446,54 @@ class B1ValidationAdapter
             'timed_out' => $result['timed_out'] ?? null,
             'duration_ms' => $result['duration_ms'] ?? null,
         ]);
+    }
+
+    /**
+     * @param  array<string,mixed>|null  $result
+     * @return array{result:B1ValidationResult,run_id:string,report_json:?string,report_csv:?string,report_summary_md:?string}
+     */
+    private function stagedInfra(string $runId, string $code, string $message, ?array $result): array
+    {
+        return [
+            'run_id' => $runId,
+            'result' => B1ValidationResult::infrastructureFailure($this->infraPayload($runId, $code, $message, $result)),
+            'report_json' => null,
+            'report_csv' => null,
+            'report_summary_md' => null,
+        ];
+    }
+
+    private function readOptionalReportFile(string $path): ?string
+    {
+        if (! is_file($path) || is_link($path)) {
+            return null;
+        }
+
+        $content = File::get($path);
+
+        return $content === '' ? null : $content;
+    }
+
+    /**
+     * @param  array<int,mixed>  $results
+     * @return array<string,mixed>
+     */
+    private function selectRecordResultFromPath(array $results, string $stagedAbsolutePath): array
+    {
+        $base = basename($stagedAbsolutePath);
+        foreach ($results as $result) {
+            if (! is_array($result)) {
+                continue;
+            }
+            $source = $result['source'] ?? null;
+            if (is_string($source) && $source !== '' && basename(str_replace('\\', '/', $source)) === $base) {
+                return $result;
+            }
+        }
+
+        $first = $results[0] ?? null;
+
+        return is_array($first) ? $first : [];
     }
 
     /** @param array<string,mixed>|null $result @return array<string,mixed> */
@@ -346,6 +529,7 @@ class B1ValidationAdapter
                 'details' => is_array($issue['details'] ?? null) ? $issue['details'] : [],
             ];
         }
+
         return $normalized;
     }
 
@@ -367,6 +551,7 @@ class B1ValidationAdapter
                 'resolved_ingredient_labels' => array_values(is_array($result['resolved_ingredient_labels'] ?? null) ? $result['resolved_ingredient_labels'] : []),
             ];
         }
+
         return $normalized;
     }
 
@@ -379,6 +564,7 @@ class B1ValidationAdapter
                 $prefix = rtrim($baseReal, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
                 if (str_starts_with(rtrim($runReal, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR, $prefix) && is_dir($runReal)) {
                     File::deleteDirectory($runReal);
+
                     return;
                 }
             }
