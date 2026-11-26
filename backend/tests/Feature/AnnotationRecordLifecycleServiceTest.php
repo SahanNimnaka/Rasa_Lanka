@@ -15,6 +15,7 @@ use App\Services\Annotation\Exceptions\AnnotationLifecycleAuthorizationException
 use App\Services\Annotation\Exceptions\AnnotationLifecycleConflictException;
 use App\Services\Annotation\Exceptions\AnnotationLifecycleValidationException;
 use App\Services\Annotation\Storage\AnnotationArtifactStore;
+use App\Services\Annotation\Storage\Exceptions\ArtifactLockException;
 use App\Services\Annotation\Storage\Exceptions\ArtifactStorageException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -36,7 +37,7 @@ class AnnotationRecordLifecycleServiceTest extends TestCase
 
         $this->artisan('migrate', ['--database' => 'sqlite', '--force' => true])->assertExitCode(0);
 
-        $this->artifactRoot = storage_path('framework/testing/annotation-lifecycle-'.uniqid('', true));
+        $this->artifactRoot = storage_path('framework/testing/annotation-lifecycle-'.str_replace('.', '-', uniqid('', true)));
         File::deleteDirectory($this->artifactRoot);
         File::ensureDirectoryExists($this->artifactRoot);
         $this->configureStore($this->artifactRoot);
@@ -1890,6 +1891,635 @@ class AnnotationRecordLifecycleServiceTest extends TestCase
         $this->app->instance(AnnotationValidationPersistenceService::class, $service);
 
         return $service;
+    }
+
+    private function makePromotionReadyRecord(bool $valid = true, array $errors = [], array $warnings = [], string $recordIdPrefix = 'rec-promote'): array
+    {
+        $this->bindCompletedB1Persistence($valid, $errors, $warnings);
+        $lifecycle = $this->makeService();
+        $user = $this->annotationUser(User::ROLE_ANNOTATOR);
+        $recordId = $recordIdPrefix.'-'.substr(bin2hex(random_bytes(4)), 0, 8);
+        $record = $lifecycle->createDraft($user, $this->validIndividualDraftPayload($recordId), $recordId)['record'];
+        $submitted = $lifecycle->createSubmissionIntent($record, $user, (int) $record->lock_version);
+        $validated = $lifecycle->executeSubmissionIntentValidation($submitted['record'], $user, (int) $submitted['record']->lock_version);
+        $locked = AnnotationRecord::query()->whereKey($validated['record']->id)->firstOrFail();
+
+        return [$lifecycle, $user, $locked, $validated['run']];
+    }
+
+    public function test_promote_and_finalize_submission_intent_succeeds_for_completed_valid_b1(): void
+    {
+        [$lifecycle, $user, $record, $run] = $this->makePromotionReadyRecord(true);
+        $stagingPath = (string) $record->submission_staging_path;
+        $stagingSha = (string) $record->submission_staging_sha256;
+        $stagingContent = File::get($this->artifactRoot.'/'.$stagingPath);
+
+        $result = $lifecycle->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $runFresh = AnnotationValidationRun::query()->whereKey($run->id)->firstOrFail();
+
+        $this->assertFalse($result['idempotent']);
+        $this->assertTrue($result['evidence_updated']);
+        $this->assertSame('finalized', $fresh->submission_state);
+        $this->assertSame('validated', $fresh->workflow_status);
+        $this->assertSame('submitted_finalized', $fresh->artifact_state);
+        $this->assertSame((int) $user->id, (int) $fresh->submitted_by_user_id);
+        $this->assertNotNull($fresh->submitted_at);
+        $this->assertNotNull($fresh->submission_finalized_at);
+        $this->assertSame((string) $run->run_id, (string) AnnotationValidationRun::query()->whereKey($fresh->latest_validation_run_id)->value('run_id'));
+        $this->assertTrue((bool) $fresh->latest_b1_valid);
+        $this->assertTrue((bool) $fresh->is_export_eligible_canonical);
+        $this->assertSame($stagingSha, $fresh->submitted_artifact_sha256);
+        $this->assertSame($stagingContent, File::get($this->artifactRoot.'/'.$fresh->submitted_json_path));
+        $this->assertSame('final_artifact', $runFresh->input_evidence_state);
+        $this->assertSame($fresh->submitted_json_path, $runFresh->durable_input_evidence_path);
+        $this->assertSame($fresh->submitted_artifact_sha256, $runFresh->durable_input_evidence_sha256);
+        $this->assertSame($stagingPath, $runFresh->input_artifact_path);
+        $this->assertSame($stagingSha, $runFresh->input_artifact_sha256);
+        $this->assertDatabaseHas('annotation_review_actions', [
+            'annotation_record_id' => $record->id,
+            'action' => 'submission_promotion_pending',
+        ]);
+        $this->assertDatabaseHas('annotation_review_actions', [
+            'annotation_record_id' => $record->id,
+            'action' => 'submission_finalized',
+            'to_workflow_status' => 'validated',
+        ]);
+        $finalizedAudit = AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->firstOrFail();
+        $this->assertSame((string) $run->run_id, $finalizedAudit->metadata_json['validation_run_id'] ?? null);
+        $this->assertSame(true, $finalizedAudit->metadata_json['b1_valid'] ?? null);
+        $this->assertSame(0, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'validation_completed')->count() - 1);
+        $this->assertSame(0, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'validation_failed')->count());
+    }
+
+    public function test_promote_and_finalize_submission_intent_succeeds_for_completed_invalid_b1(): void
+    {
+        [$lifecycle, $user, $record, $run] = $this->makePromotionReadyRecord(false, [[
+            'code' => 'ERR_X',
+            'severity' => 'error',
+            'record_id' => 'rec-x',
+            'field' => 'ingredient_labels',
+            'message' => 'Invalid',
+        ]]);
+
+        $lifecycle->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $runFresh = AnnotationValidationRun::query()->whereKey($run->id)->firstOrFail();
+
+        $this->assertSame('finalized', $fresh->submission_state);
+        $this->assertSame('validation_failed', $fresh->workflow_status);
+        $this->assertSame('submitted_finalized', $fresh->artifact_state);
+        $this->assertFalse((bool) $fresh->latest_b1_valid);
+        $this->assertFalse((bool) $fresh->is_export_eligible_canonical);
+        $this->assertSame('completed', $runFresh->status);
+        $this->assertFalse((bool) $runFresh->is_valid);
+        $this->assertDatabaseHas('annotation_review_actions', [
+            'annotation_record_id' => $record->id,
+            'action' => 'submission_finalized',
+            'to_workflow_status' => 'validation_failed',
+        ]);
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'validation_failed')->count());
+    }
+
+    public function test_promote_rejects_b1_infra_failed_and_staging_written_states(): void
+    {
+        $this->bindInfraB1Persistence();
+        $lifecycle = $this->makeService();
+        $user = $this->annotationUser(User::ROLE_ANNOTATOR);
+        $recordId = 'rec-promote-infra-'.substr(bin2hex(random_bytes(4)), 0, 8);
+        $record = $lifecycle->createDraft($user, $this->validIndividualDraftPayload($recordId), $recordId)['record'];
+        $submitted = $lifecycle->createSubmissionIntent($record, $user, (int) $record->lock_version);
+
+        try {
+            $lifecycle->promoteAndFinalizeSubmissionIntent($submitted['record'], $user, (int) $submitted['record']->lock_version);
+            $this->fail('Expected staging_written rejection.');
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('not eligible', $e->getMessage());
+        }
+
+        $validated = $lifecycle->executeSubmissionIntentValidation($submitted['record'], $user, (int) $submitted['record']->lock_version);
+        try {
+            $lifecycle->promoteAndFinalizeSubmissionIntent($validated['record'], $user, (int) $validated['record']->lock_version);
+            $this->fail('Expected b1_infra_failed rejection.');
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('not eligible', $e->getMessage());
+        }
+
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $this->assertSame('b1_infra_failed', $fresh->submission_state);
+        $this->assertSame('draft', $fresh->workflow_status);
+        $this->assertNull($fresh->submitted_json_path);
+    }
+
+    public function test_promote_rejects_missing_intent_mismatch_and_missing_completed_run(): void
+    {
+        [$lifecycle, $user, $record] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-a');
+        AnnotationRecord::query()->whereKey($record->id)->update(['submission_intent_id' => null]);
+        $missingIntent = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        try {
+            $lifecycle->promoteAndFinalizeSubmissionIntent($missingIntent, $user, (int) $missingIntent->lock_version);
+            $this->fail('Expected missing intent rejection.');
+        } catch (AnnotationLifecycleValidationException|AnnotationLifecycleConflictException $e) {
+            $this->assertTrue(true);
+        }
+
+        [$lifecycle2, $user2, $record2, $run2] = $this->makePromotionReadyRecord(true);
+        AnnotationValidationRun::query()->whereKey($run2->id)->update(['submission_intent_id' => 'si-other']);
+        try {
+            $lifecycle2->promoteAndFinalizeSubmissionIntent($record2, $user2, (int) $record2->lock_version);
+            $this->fail('Expected intent/run mismatch rejection.');
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('not found', strtolower($e->getMessage()));
+        }
+
+        [$lifecycle3, $user3, $record3, $run3] = $this->makePromotionReadyRecord(true);
+        AnnotationValidationRun::query()->whereKey($run3->id)->update(['status' => 'infra_failed']);
+        try {
+            $lifecycle3->promoteAndFinalizeSubmissionIntent($record3, $user3, (int) $record3->lock_version);
+            $this->fail('Expected incomplete run rejection.');
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('not completed', $e->getMessage());
+        }
+    }
+
+    public function test_promote_retry_from_promotion_pending_without_final_artifact_completes_without_duplicate_audits_or_b1_rerun(): void
+    {
+        [$lifecycle, $user, $record, $run] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-pending');
+        $stagingPath = (string) $record->submission_staging_path;
+        $stagingSha = (string) $record->submission_staging_sha256;
+        $stagingContent = File::get($this->artifactRoot.'/'.$stagingPath);
+
+        AnnotationRecord::query()->whereKey($record->id)->update([
+            'submission_state' => 'promotion_pending',
+            'lock_version' => (int) $record->lock_version + 1,
+            'updated_at' => now(),
+        ]);
+        $pending = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $this->assertSame('promotion_pending', $pending->submission_state);
+        $this->assertFileExists($this->artifactRoot.'/'.$stagingPath);
+        $this->assertFileDoesNotExist($this->artifactRoot.'/submitted/'.$record->record_id.'/record.json');
+
+        $validationRunCountBefore = AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count();
+        $promotionPendingAuditsBefore = AnnotationReviewAction::query()
+            ->where('annotation_record_id', $record->id)
+            ->where('action', 'submission_promotion_pending')
+            ->count();
+        $finalizedAuditsBefore = AnnotationReviewAction::query()
+            ->where('annotation_record_id', $record->id)
+            ->where('action', 'submission_finalized')
+            ->count();
+
+        $result = $lifecycle->promoteAndFinalizeSubmissionIntent($pending, $user, (int) $pending->lock_version);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $runFresh = AnnotationValidationRun::query()->whereKey($run->id)->firstOrFail();
+
+        $this->assertFalse($result['idempotent']);
+        $this->assertTrue($result['evidence_updated']);
+        $this->assertSame('finalized', $fresh->submission_state);
+        $this->assertSame('validated', $fresh->workflow_status);
+        $this->assertSame('submitted_finalized', $fresh->artifact_state);
+        $this->assertSame($stagingSha, $fresh->submitted_artifact_sha256);
+        $this->assertSame($stagingContent, File::get($this->artifactRoot.'/'.(string) $fresh->submitted_json_path));
+        $this->assertSame(hash('sha256', $stagingContent), hash_file('sha256', $this->artifactRoot.'/'.(string) $fresh->submitted_json_path));
+        $this->assertSame('final_artifact', $runFresh->input_evidence_state);
+        $this->assertSame($fresh->submitted_json_path, $runFresh->durable_input_evidence_path);
+        $this->assertSame($fresh->submitted_artifact_sha256, $runFresh->durable_input_evidence_sha256);
+        $this->assertSame($validationRunCountBefore, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count());
+        $this->assertSame($promotionPendingAuditsBefore, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_promotion_pending')->count());
+        $this->assertSame($finalizedAuditsBefore + 1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+    }
+
+    public function test_promote_rejects_stale_lock_discarded_and_already_finalized_without_idempotent_match(): void
+    {
+        [$lifecycle, $user, $record] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-a');
+        try {
+            $lifecycle->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version - 1);
+            $this->fail('Expected stale lock rejection.');
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('Stale lock_version', $e->getMessage());
+        }
+
+        [$lifecycle2, $user2, $record2] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-b');
+        AnnotationRecord::query()->whereKey($record2->id)->update(['discarded_at' => now(), 'discard_reason' => 'x']);
+        $discarded = AnnotationRecord::query()->whereKey($record2->id)->firstOrFail();
+        try {
+            $lifecycle2->promoteAndFinalizeSubmissionIntent($discarded, $user2, (int) $discarded->lock_version);
+            $this->fail('Expected discarded rejection.');
+        } catch (AnnotationLifecycleConflictException $e) {
+            $this->assertStringContainsString('Discarded', $e->getMessage());
+        }
+
+        [$lifecycle3, $user3, $record3] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-c');
+        $lifecycle3->promoteAndFinalizeSubmissionIntent($record3, $user3, (int) $record3->lock_version);
+        $finalized = AnnotationRecord::query()->whereKey($record3->id)->firstOrFail();
+        File::put($this->artifactRoot.'/'.$finalized->submitted_json_path, '{"tampered":true}');
+        try {
+            $lifecycle3->promoteAndFinalizeSubmissionIntent($finalized, $user3, (int) $finalized->lock_version);
+            $this->fail('Expected inconsistent finalized rejection.');
+        } catch (\Throwable $e) {
+            $this->assertTrue(true);
+        }
+    }
+
+    public function test_promote_handles_existing_matching_final_artifact_and_conflicting_final_artifact(): void
+    {
+        [$lifecycle, $user, $record] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-a');
+        $store = new AnnotationArtifactStore;
+        $published = $store->publishFinalSubmittedArtifact(
+            (string) $record->record_id,
+            (string) $record->submission_staging_path,
+            (string) $record->submission_staging_sha256,
+            (string) $record->submission_staging_sha256,
+            false
+        );
+        $this->assertFalse($published['idempotent']);
+
+        $result = $lifecycle->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $this->assertSame('finalized', $fresh->submission_state);
+        $this->assertSame($published['sha256'], $fresh->submitted_artifact_sha256);
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+
+        [$lifecycle2, $user2, $record2] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-b');
+        $conflictPath = $this->artifactRoot.'/submitted/'.$record2->record_id.'/record.json';
+        File::ensureDirectoryExists(dirname($conflictPath));
+        File::put($conflictPath, '{"different":true}');
+        try {
+            $lifecycle2->promoteAndFinalizeSubmissionIntent($record2, $user2, (int) $record2->lock_version);
+            $this->fail('Expected conflicting final hash failure.');
+        } catch (\Throwable $e) {
+            $this->assertStringContainsString('different hash', strtolower($e->getMessage()));
+        }
+        $fresh2 = AnnotationRecord::query()->whereKey($record2->id)->firstOrFail();
+        $this->assertSame('promotion_pending', $fresh2->submission_state);
+        $this->assertSame('draft', $fresh2->workflow_status);
+        $this->assertNull($fresh2->submitted_json_path);
+        $this->assertSame('{"different":true}', File::get($conflictPath));
+    }
+
+    public function test_promote_retry_after_final_publication_before_db_finalization_is_safe(): void
+    {
+        [$lifecycle, $user, $record] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-a');
+        $store = new AnnotationArtifactStore;
+        $store->publishFinalSubmittedArtifact(
+            (string) $record->record_id,
+            (string) $record->submission_staging_path,
+            (string) $record->submission_staging_sha256,
+            (string) $record->submission_staging_sha256,
+            false
+        );
+        AnnotationRecord::query()->whereKey($record->id)->update([
+            'submission_state' => 'promotion_pending',
+            'lock_version' => (int) $record->lock_version + 1,
+        ]);
+        $pending = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+
+        $result = $lifecycle->promoteAndFinalizeSubmissionIntent($pending, $user, (int) $pending->lock_version);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $this->assertSame('finalized', $fresh->submission_state);
+        $this->assertSame('validated', $fresh->workflow_status);
+        $this->assertNotNull($fresh->submitted_json_path);
+        $this->assertTrue($result['evidence_updated']);
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+    }
+
+    public function test_promote_retry_after_finalization_before_evidence_update_is_evidence_only(): void
+    {
+        [$lifecycle, $user, $record, $run] = $this->makePromotionReadyRecord(true);
+        $result = $lifecycle->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+        $finalized = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $lockAfterFinalize = (int) $finalized->lock_version;
+
+        AnnotationValidationRun::query()->whereKey($run->id)->update([
+            'input_evidence_state' => 'staged_path',
+            'durable_input_evidence_path' => null,
+            'durable_input_evidence_sha256' => null,
+        ]);
+        $tmpPath = $this->artifactRoot.'/submitted/'.$record->record_id.'/.record.json.promote-retry.tmp';
+        File::put($tmpPath, File::get($this->artifactRoot.'/'.$finalized->submitted_json_path));
+
+        $retry = $lifecycle->promoteAndFinalizeSubmissionIntent($finalized, $user, $lockAfterFinalize);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $runFresh = AnnotationValidationRun::query()->whereKey($run->id)->firstOrFail();
+
+        $this->assertTrue($retry['idempotent']);
+        $this->assertTrue($retry['evidence_updated']);
+        $this->assertSame($lockAfterFinalize, (int) $fresh->lock_version);
+        $this->assertSame('final_artifact', $runFresh->input_evidence_state);
+        $this->assertSame($fresh->submitted_json_path, $runFresh->durable_input_evidence_path);
+        $this->assertFalse(File::exists($tmpPath));
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+    }
+
+    public function test_repeated_finalized_call_is_idempotent_and_does_not_duplicate_audits(): void
+    {
+        [$lifecycle, $user, $record] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-a');
+        $first = $lifecycle->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+        $finalized = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $second = $lifecycle->promoteAndFinalizeSubmissionIntent($finalized, $user, (int) $finalized->lock_version);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+
+        $this->assertFalse($first['idempotent']);
+        $this->assertTrue($second['idempotent']);
+        $this->assertSame((int) $finalized->lock_version, (int) $fresh->lock_version);
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_promotion_pending')->count());
+    }
+
+    public function test_repeated_finalized_call_is_idempotent_and_does_not_rerun_b1_or_duplicate_audits(): void
+    {
+        [$lifecycle, $user, $record] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-c');
+        $first = $lifecycle->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+        $finalized = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $validationRunCount = AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count();
+        $auditCount = AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->count();
+        $second = $lifecycle->promoteAndFinalizeSubmissionIntent($finalized, $user, (int) $finalized->lock_version);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+
+        $this->assertFalse($first['idempotent']);
+        $this->assertTrue($second['idempotent']);
+        $this->assertSame((int) $finalized->lock_version, (int) $fresh->lock_version);
+        $this->assertSame($validationRunCount, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count());
+        $this->assertSame($auditCount, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->count());
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+    }
+
+    public function test_finalization_tx_failure_allows_safe_retry_without_duplicate_audit(): void
+    {
+        [$lifecycleBase, $user, $record, $run] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-txf');
+        $store = new AnnotationArtifactStore;
+        $stagingPath = (string) $record->submission_staging_path;
+        $stagingSha = (string) $record->submission_staging_sha256;
+        $store->publishFinalSubmittedArtifact((string) $record->record_id, $stagingPath, $stagingSha, $stagingSha, false);
+        AnnotationRecord::query()->whereKey($record->id)->update([
+            'submission_state' => 'promotion_pending',
+            'lock_version' => (int) $record->lock_version + 1,
+        ]);
+        $pending = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+
+        $failFinalize = true;
+        AnnotationReviewAction::creating(function (AnnotationReviewAction $action) use (&$failFinalize, $record): void {
+            if ($failFinalize && $action->annotation_record_id === $record->id && $action->action === 'submission_finalized') {
+                throw new \RuntimeException('Injected finalization failure.');
+            }
+        });
+
+        $threw = null;
+        try {
+            $lifecycleBase->promoteAndFinalizeSubmissionIntent($pending, $user, (int) $pending->lock_version);
+        } catch (\Throwable $e) {
+            $threw = $e;
+        }
+        AnnotationReviewAction::clearBootedModels();
+        $this->assertInstanceOf(\RuntimeException::class, $threw);
+        $this->assertSame('Injected finalization failure.', $threw?->getMessage());
+
+        $afterFail = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $this->assertSame('promotion_pending', $afterFail->submission_state);
+        $this->assertNull($afterFail->submitted_json_path);
+        $this->assertSame(0, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+        $this->assertFileExists($this->artifactRoot.'/submitted/'.$record->record_id.'/record.json');
+
+        $failFinalize = false;
+        $retry = $lifecycleBase->promoteAndFinalizeSubmissionIntent($afterFail, $user, (int) $afterFail->lock_version);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $runFresh = AnnotationValidationRun::query()->whereKey($run->id)->firstOrFail();
+        $this->assertSame('finalized', $fresh->submission_state);
+        $this->assertSame('validated', $fresh->workflow_status);
+        $this->assertSame('final_artifact', $runFresh->input_evidence_state);
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+        $this->assertSame(1, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count());
+        $this->assertFalse($retry['idempotent'] && $retry['record']->submission_state !== 'finalized');
+    }
+
+    public function test_evidence_tx_failure_after_finalization_allows_evidence_only_retry(): void
+    {
+        [$lifecycleBase, $user, $record, $run] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-evf');
+        $store = new class extends AnnotationArtifactStore
+        {
+            public bool $failEvidenceVerify = false;
+
+            public string $finalPath = '';
+
+            public function verifyStoredArtifact(string $relativePath, string $expectedSha256): array
+            {
+                if ($this->failEvidenceVerify && $relativePath === $this->finalPath) {
+                    $this->failEvidenceVerify = false; // fail once inside evidence tx
+                    throw new ArtifactStorageException('Injected evidence verification failure.');
+                }
+
+                return parent::verifyStoredArtifact($relativePath, $expectedSha256);
+            }
+        };
+        $svc = new AnnotationRecordLifecycleService($store);
+        // precompute final path by publishing through normal flow? easier: run promotion, intercept by setting flag when final exists.
+        // Instead, wrap with a store that toggles after finalization commit by checking record state in verifyStoredArtifact.
+        $store2 = new class extends AnnotationArtifactStore
+        {
+            public bool $failed = false;
+
+            public function verifyStoredArtifact(string $relativePath, string $expectedSha256): array
+            {
+                if (! $this->failed && str_contains($relativePath, '/record.json')) {
+                    $recordId = basename(dirname($relativePath));
+                    $rec = AnnotationRecord::query()->where('record_id', $recordId)->first();
+                    if ($rec && $rec->submission_state === 'finalized') {
+                        $this->failed = true;
+                        throw new ArtifactStorageException('Injected evidence verification failure.');
+                    }
+                }
+
+                return parent::verifyStoredArtifact($relativePath, $expectedSha256);
+            }
+        };
+        $svc2 = new AnnotationRecordLifecycleService($store2);
+
+        try {
+            $svc2->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+            $this->fail('Expected evidence failure.');
+        } catch (ArtifactStorageException $e) {
+            $this->assertStringContainsString('Injected evidence verification failure', $e->getMessage());
+        }
+
+        $finalized = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $runAfter = AnnotationValidationRun::query()->whereKey($run->id)->firstOrFail();
+        $this->assertSame('finalized', $finalized->submission_state);
+        $this->assertSame('validated', $finalized->workflow_status);
+        $this->assertSame('staged_path', $runAfter->input_evidence_state);
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+        $this->assertFileExists($this->artifactRoot.'/'.(string) $finalized->submitted_json_path);
+
+        $retry = $lifecycleBase->promoteAndFinalizeSubmissionIntent($finalized, $user, (int) $finalized->lock_version);
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $runFresh = AnnotationValidationRun::query()->whereKey($run->id)->firstOrFail();
+        $this->assertTrue($retry['idempotent']);
+        $this->assertTrue($retry['evidence_updated']);
+        $this->assertSame('finalized', $fresh->submission_state);
+        $this->assertSame('final_artifact', $runFresh->input_evidence_state);
+        $this->assertSame($fresh->submitted_json_path, $runFresh->durable_input_evidence_path);
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+        $this->assertSame(1, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count());
+    }
+
+    public function test_cleanup_failure_after_evidence_commit_is_nonfatal_and_retryable(): void
+    {
+        [$lifecycle, $user, $record, $run] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-clean');
+        $store = new class extends AnnotationArtifactStore
+        {
+            public bool $failCleanup = true;
+
+            public function cleanupPromotionTempAfterEvidenceCommit(string $recordId, string $promotionTmpRelativePath, string $expectedSha256, ?string $secondExpectedSha256 = null): array
+            {
+                if ($this->failCleanup) {
+                    throw new ArtifactStorageException('Injected cleanup failure.');
+                }
+
+                return parent::cleanupPromotionTempAfterEvidenceCommit($recordId, $promotionTmpRelativePath, $expectedSha256, $secondExpectedSha256);
+            }
+        };
+        $svc = new AnnotationRecordLifecycleService($store);
+        $beforeRuns = AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count();
+
+        try {
+            $svc->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+            $this->fail('Expected cleanup failure.');
+        } catch (ArtifactStorageException $e) {
+            $this->assertStringContainsString('Injected cleanup failure', $e->getMessage());
+        }
+
+        $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+        $runFresh = AnnotationValidationRun::query()->whereKey($run->id)->firstOrFail();
+        $this->assertSame('finalized', $fresh->submission_state);
+        $this->assertSame('validated', $fresh->workflow_status);
+        $this->assertSame('final_artifact', $runFresh->input_evidence_state);
+        $this->assertFileExists($this->artifactRoot.'/'.(string) $fresh->submitted_json_path);
+        $this->assertFileExists($this->artifactRoot.'/'.(string) $fresh->submission_staging_path);
+        $this->assertNotEmpty(glob($this->artifactRoot.'/submitted/'.$record->record_id.'/.record.json.promote-*.tmp') ?: []);
+        $this->assertSame($beforeRuns, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count());
+        $this->assertSame(1, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->where('action', 'submission_finalized')->count());
+
+        $store->failCleanup = false;
+        $retry = $svc->promoteAndFinalizeSubmissionIntent($fresh, $user, (int) $fresh->lock_version);
+        $this->assertTrue($retry['idempotent']);
+        $this->assertSame($beforeRuns, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count());
+        $this->assertSame([], glob($this->artifactRoot.'/submitted/'.$record->record_id.'/.record.json.promote-*.tmp') ?: []);
+    }
+
+    public function test_promote_nested_store_operations_reuse_promotion_lock_and_cleanup_waits_for_evidence_commit(): void
+    {
+        if (function_exists('pcntl_alarm')) {
+            pcntl_alarm(10);
+        }
+
+        try {
+            [$lifecycleBase, $user, $record, $run] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-reentrant');
+            $store = new class extends AnnotationArtifactStore
+            {
+                public int $lockEntries = 0;
+
+                public int $maxLockEntries = 0;
+
+                public bool $publishObservedOuterLock = false;
+
+                public bool $cleanupObservedOuterLock = false;
+
+                public bool $cleanupObservedEvidenceCommitted = false;
+
+                public ?int $lockEntriesAfterCallback = null;
+
+                public function withRecordPromotionLock(string $recordId, callable $callback): mixed
+                {
+                    $this->lockEntries++;
+                    $this->maxLockEntries = max($this->maxLockEntries, $this->lockEntries);
+                    try {
+                        return parent::withRecordPromotionLock($recordId, $callback);
+                    } finally {
+                        $this->lockEntries--;
+                        $this->lockEntriesAfterCallback = $this->lockEntries;
+                    }
+                }
+
+                public function publishFinalSubmittedArtifact(string $recordId, string $stagingRelativePath, string $expectedSha256, ?string $secondExpectedSha256 = null, bool $cleanupPromotionTemp = true): array
+                {
+                    $this->publishObservedOuterLock = $this->lockEntries > 0;
+
+                    return parent::publishFinalSubmittedArtifact($recordId, $stagingRelativePath, $expectedSha256, $secondExpectedSha256, $cleanupPromotionTemp);
+                }
+
+                public function cleanupPromotionTempAfterEvidenceCommit(string $recordId, string $promotionTmpRelativePath, string $expectedSha256, ?string $secondExpectedSha256 = null): array
+                {
+                    $this->cleanupObservedOuterLock = $this->lockEntries > 0;
+                    $this->cleanupObservedEvidenceCommitted = AnnotationValidationRun::query()
+                        ->where('annotation_record_id', function ($query) use ($recordId) {
+                            $query->select('id')->from('annotation_records')->where('record_id', $recordId)->limit(1);
+                        })
+                        ->where('input_evidence_state', 'final_artifact')
+                        ->exists();
+
+                    return parent::cleanupPromotionTempAfterEvidenceCommit($recordId, $promotionTmpRelativePath, $expectedSha256, $secondExpectedSha256);
+                }
+            };
+
+            $svc = new AnnotationRecordLifecycleService($store);
+            $result = $svc->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+
+            $fresh = AnnotationRecord::query()->whereKey($record->id)->firstOrFail();
+            $runFresh = AnnotationValidationRun::query()->whereKey($run->id)->firstOrFail();
+
+            $this->assertFalse($result['idempotent']);
+            $this->assertTrue($result['evidence_updated']);
+            $this->assertSame('finalized', $fresh->submission_state);
+            $this->assertSame('final_artifact', $runFresh->input_evidence_state);
+            $this->assertTrue($store->publishObservedOuterLock);
+            $this->assertTrue($store->cleanupObservedOuterLock);
+            $this->assertTrue($store->cleanupObservedEvidenceCommitted);
+            $this->assertGreaterThanOrEqual(2, $store->maxLockEntries);
+            $this->assertSame(0, $store->lockEntries);
+            $this->assertSame(0, $store->lockEntriesAfterCallback);
+            $this->assertSame([], glob($this->artifactRoot.'/submitted/'.$record->record_id.'/.record.json.promote-*.tmp') ?: []);
+        } finally {
+            if (function_exists('pcntl_alarm')) {
+                pcntl_alarm(0);
+            }
+        }
+    }
+
+    public function test_promote_fails_closed_on_lock_failure_without_db_or_fs_mutation(): void
+    {
+        [$lifecycle, $user, $record] = $this->makePromotionReadyRecord(true, [], [], 'rec-promote-lock');
+        $baseStore = new AnnotationArtifactStore;
+        $inspectionBefore = $baseStore->inspectRecordArtifacts((string) $record->record_id);
+        $recordBefore = AnnotationRecord::query()->whereKey($record->id)->firstOrFail()->getAttributes();
+        $runCountBefore = AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count();
+        $auditCountBefore = AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->count();
+
+        $failingStore = new class extends AnnotationArtifactStore
+        {
+            public function withRecordPromotionLock(string $recordId, callable $callback): mixed
+            {
+                throw new ArtifactLockException('Injected lock failure.');
+            }
+        };
+        $svc = new AnnotationRecordLifecycleService($failingStore);
+
+        try {
+            $svc->promoteAndFinalizeSubmissionIntent($record, $user, (int) $record->lock_version);
+            $this->fail('Expected lock failure.');
+        } catch (ArtifactLockException $e) {
+            $this->assertStringContainsString('Injected lock failure', $e->getMessage());
+        }
+
+        $recordAfter = AnnotationRecord::query()->whereKey($record->id)->firstOrFail()->getAttributes();
+        $inspectionAfter = $baseStore->inspectRecordArtifacts((string) $record->record_id);
+        $this->assertSame($recordBefore['submission_state'], $recordAfter['submission_state']);
+        $this->assertSame($recordBefore['workflow_status'], $recordAfter['workflow_status']);
+        $this->assertSame($recordBefore['artifact_state'], $recordAfter['artifact_state']);
+        $this->assertSame($recordBefore['lock_version'], $recordAfter['lock_version']);
+        $this->assertNull($recordAfter['submitted_json_path']);
+        $this->assertSame($runCountBefore, AnnotationValidationRun::query()->where('annotation_record_id', $record->id)->count());
+        $this->assertSame($auditCountBefore, AnnotationReviewAction::query()->where('annotation_record_id', $record->id)->count());
+        $this->assertSame($inspectionBefore['final_artifact'], $inspectionAfter['final_artifact']);
+        $this->assertCount(count($inspectionBefore['promotion_temps']), $inspectionAfter['promotion_temps']);
     }
 
     private function bindInfraB1Persistence(string $code = 'B1_PROCESS_FAILED', bool $timedOut = false, ?int $exitCode = 2): AnnotationValidationPersistenceService

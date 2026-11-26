@@ -139,6 +139,61 @@ class AnnotationArtifactStoreTest extends TestCase
         $this->assertFileExists($this->root.'/submitted/record-1/record.json');
     }
 
+    public function test_publish_final_can_defer_promotion_tmp_cleanup_and_cleanup_is_idempotent(): void
+    {
+        $store = $this->makeStore();
+        $content = '{"final":true}';
+        $staging = $store->writeSubmissionStaging('record-1', 'intent-1', $content);
+
+        $published = $store->publishFinalSubmittedArtifact('record-1', $staging['relative_path'], $staging['sha256'], $staging['sha256'], false);
+
+        $this->assertFalse($published['idempotent']);
+        $this->assertFalse($published['promotion_tmp_removed']);
+        $this->assertNotEmpty($published['promotion_tmp_relative_path']);
+        $tmpRelative = $published['promotion_tmp_relative_path'];
+        $this->assertFileExists($this->root.'/'.$tmpRelative);
+        $this->assertSame($content, File::get($this->root.'/submitted/record-1/record.json'));
+
+        $cleanup = $store->cleanupPromotionTempAfterEvidenceCommit('record-1', $tmpRelative, $staging['sha256'], $staging['sha256']);
+        $this->assertTrue($cleanup['removed']);
+        $this->assertFileDoesNotExist($this->root.'/'.$tmpRelative);
+        $this->assertSame($content, File::get($this->root.'/submitted/record-1/record.json'));
+
+        $cleanupAgain = $store->cleanupPromotionTempAfterEvidenceCommit('record-1', $tmpRelative, $staging['sha256'], $staging['sha256']);
+        $this->assertTrue($cleanupAgain['removed']);
+        $this->assertFileExists($this->root.'/submitted/record-1/record.json');
+    }
+
+    public function test_cleanup_promotion_temp_rejects_staging_or_final_paths_and_verifies_final_hash(): void
+    {
+        $store = $this->makeStore();
+        $staging = $store->writeSubmissionStaging('record-1', 'intent-1', '{"final":true}');
+        $store->publishFinalSubmittedArtifact('record-1', $staging['relative_path'], $staging['sha256'], $staging['sha256'], false);
+
+        try {
+            $store->cleanupPromotionTempAfterEvidenceCommit('record-1', $staging['relative_path'], $staging['sha256']);
+            $this->fail('Expected staging path rejection.');
+        } catch (\Throwable $e) {
+            $this->assertStringContainsString('Promotion temp path', $e->getMessage());
+        }
+
+        try {
+            $store->cleanupPromotionTempAfterEvidenceCommit('record-1', 'submitted/record-1/record.json', $staging['sha256']);
+            $this->fail('Expected final path rejection.');
+        } catch (\Throwable $e) {
+            $this->assertStringContainsString('Promotion temp path', $e->getMessage());
+        }
+
+        try {
+            $store->cleanupPromotionTempAfterEvidenceCommit('record-1', 'submitted/record-1/.record.json.promote-fake.tmp', hash('sha256', 'wrong'));
+            $this->fail('Expected final hash verification failure.');
+        } catch (\Throwable $e) {
+            $this->assertStringContainsString('hash mismatch', strtolower($e->getMessage()));
+        }
+
+        $this->assertFileExists($this->root.'/submitted/record-1/record.json');
+    }
+
     public function test_publish_final_fails_closed_for_different_hash_and_keeps_final_unchanged(): void
     {
         $store = $this->makeStore();

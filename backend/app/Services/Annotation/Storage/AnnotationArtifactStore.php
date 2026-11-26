@@ -221,7 +221,7 @@ class AnnotationArtifactStore
      *
      * @return array{record_id:string,relative_path:string,sha256:string,idempotent:bool,source_relative_path:string,promotion_tmp_removed?:bool,promotion_tmp_relative_path?:string}
      */
-    public function publishFinalSubmittedArtifact(string $recordId, string $stagingRelativePath, string $expectedSha256, ?string $secondExpectedSha256 = null): array
+    public function publishFinalSubmittedArtifact(string $recordId, string $stagingRelativePath, string $expectedSha256, ?string $secondExpectedSha256 = null, bool $cleanupPromotionTemp = true): array
     {
         $recordId = $this->assertIdentifier($recordId, 'record_id');
         $expectedSha256 = $this->assertSha256($expectedSha256, 'expected_sha256');
@@ -235,7 +235,7 @@ class AnnotationArtifactStore
             throw new ArtifactPathException('Staging artifact must be within the record staging namespace.');
         }
 
-        return $this->withRecordPromotionLock($recordId, function () use ($recordId, $stagingRelative, $expectedSha256, $secondExpectedSha256): array {
+        return $this->withRecordPromotionLock($recordId, function () use ($recordId, $stagingRelative, $expectedSha256, $secondExpectedSha256, $cleanupPromotionTemp): array {
             $stagingAbsolute = $this->absolutePathForRelative($stagingRelative, true);
             if (! is_file($stagingAbsolute) || is_link($stagingAbsolute)) {
                 throw new ArtifactNotFoundException('Staging artifact is missing.');
@@ -283,7 +283,9 @@ class AnnotationArtifactStore
                 }
                 $finalPublished = true;
 
-                $tmpCleanup = $this->cleanupPublishedPromotionTemp($tmpAbsolute, $finalAbsolute, $expectedSha256, $secondExpectedSha256);
+                $tmpCleanup = $cleanupPromotionTemp
+                    ? $this->cleanupPublishedPromotionTemp($tmpAbsolute, $finalAbsolute, $expectedSha256, $secondExpectedSha256)
+                    : ['removed' => false, 'relative_path' => $tmpRelative];
 
                 return [
                     'record_id' => $recordId,
@@ -490,6 +492,18 @@ class AnnotationArtifactStore
     public function withRecordPromotionLock(string $recordId, callable $callback): mixed
     {
         $recordId = $this->assertIdentifier($recordId, 'record_id');
+        if ((self::$processMutexCounts[$recordId] ?? 0) > 0) {
+            self::$processMutexCounts[$recordId]++;
+            try {
+                return $callback();
+            } finally {
+                self::$processMutexCounts[$recordId]--;
+                if ((self::$processMutexCounts[$recordId] ?? 0) <= 0) {
+                    unset(self::$processMutexCounts[$recordId]);
+                }
+            }
+        }
+
         $lockRelative = $this->promotionLockRelativePath($recordId);
         $lockAbsolute = $this->absolutePathForRelative($lockRelative, false);
         $this->ensureDirectory(dirname($lockAbsolute));
@@ -528,7 +542,7 @@ class AnnotationArtifactStore
         }
     }
 
-    /** @return array{record_id:string,relative_path:string,sha256:string,idempotent:bool,source_relative_path:string} */
+    /** @return array{record_id:string,relative_path:string,sha256:string,idempotent:bool,source_relative_path:string,promotion_tmp_removed:bool,promotion_tmp_relative_path:?string} */
     private function handleExistingFinal(string $recordId, string $finalRelative, string $finalAbsolute, string $expectedSha256, ?string $secondExpectedSha256, string $stagingRelative): array
     {
         if (! is_file($finalAbsolute) || is_link($finalAbsolute)) {
@@ -549,6 +563,8 @@ class AnnotationArtifactStore
             'sha256' => $finalSha,
             'idempotent' => true,
             'source_relative_path' => $stagingRelative,
+            'promotion_tmp_removed' => false,
+            'promotion_tmp_relative_path' => null,
         ];
     }
 
@@ -977,6 +993,75 @@ class AnnotationArtifactStore
         return ['removed' => ! is_file($tmpAbsolute), 'relative_path' => $tmpRelative];
     }
 
+    /**
+     * Remove a promotion temp hard-link name only after durable evidence commit.
+     *
+     * @return array{record_id:string,removed:bool,promotion_tmp_relative_path:string,final_relative_path:string,final_sha256:string}
+     */
+    public function cleanupPromotionTempAfterEvidenceCommit(string $recordId, string $promotionTmpRelativePath, string $expectedSha256, ?string $secondExpectedSha256 = null): array
+    {
+        $recordId = $this->assertIdentifier($recordId, 'record_id');
+        $expectedSha256 = $this->assertSha256($expectedSha256, 'expected_sha256');
+        $secondExpectedSha256 = $secondExpectedSha256 !== null && $secondExpectedSha256 !== ''
+            ? $this->assertSha256($secondExpectedSha256, 'second_expected_sha256')
+            : null;
+
+        $operation = function () use ($recordId, $promotionTmpRelativePath, $expectedSha256, $secondExpectedSha256): array {
+            $tmpRelative = $this->normalizeRelativePath($promotionTmpRelativePath);
+            $this->assertPromotionTempPathForRecord($recordId, $tmpRelative);
+
+            $finalRelative = $this->finalSubmittedRelativePath($recordId);
+            $finalAbsolute = $this->absolutePathForRelative($finalRelative, true);
+            if (! is_file($finalAbsolute) || is_link($finalAbsolute)) {
+                throw new ArtifactIntegrityConflictException('Final artifact missing or invalid before promotion temp cleanup.');
+            }
+
+            $finalSha = $this->hashFile($finalAbsolute);
+            $this->assertHashesMatch($finalSha, $expectedSha256, 'Final artifact hash mismatch before promotion temp cleanup.');
+            if ($secondExpectedSha256 !== null) {
+                $this->assertHashesMatch($finalSha, $secondExpectedSha256, 'Final artifact hash mismatch before promotion temp cleanup.');
+            }
+
+            $tmpAbsolute = $this->absolutePathForRelative($tmpRelative, false);
+            if (is_file($tmpAbsolute) || is_link($tmpAbsolute)) {
+                if (is_link($tmpAbsolute) || ! is_file($tmpAbsolute)) {
+                    throw new ArtifactIntegrityConflictException('Promotion temp path is not a regular file.');
+                }
+                if (! @unlink($tmpAbsolute) && is_file($tmpAbsolute)) {
+                    throw new ArtifactStorageException('Failed to remove promotion temp after evidence commit.');
+                }
+            }
+
+            return [
+                'record_id' => $recordId,
+                'removed' => ! is_file($tmpAbsolute) && ! is_link($tmpAbsolute),
+                'promotion_tmp_relative_path' => $tmpRelative,
+                'final_relative_path' => $finalRelative,
+                'final_sha256' => $finalSha,
+            ];
+        };
+
+        if ((self::$processMutexCounts[$recordId] ?? 0) > 0) {
+            return $operation();
+        }
+
+        return $this->withRecordPromotionLock($recordId, $operation);
+    }
+
+    private function assertPromotionTempPathForRecord(string $recordId, string $relativePath): void
+    {
+        $expectedPrefix = $this->submittedPath.'/'.$recordId.'/.record.json.promote-';
+        if (! str_starts_with($relativePath, $expectedPrefix) || ! str_ends_with($relativePath, '.tmp')) {
+            throw new ArtifactPathException('Promotion temp path is not valid for the record.');
+        }
+
+        $finalRelative = $this->finalSubmittedRelativePath($recordId);
+        $stagingPrefix = $this->submittedPath.'/'.$recordId.'/staging/';
+        if ($relativePath === $finalRelative || str_starts_with($relativePath, $stagingPrefix)) {
+            throw new ArtifactPathException('Refusing to remove staging or final artifact path.');
+        }
+    }
+
     private function relativePathFromAbsolute(string $absolutePath): string
     {
         $absolute = $this->normalizeAbsolutePath($absolutePath);
@@ -1016,12 +1101,19 @@ class AnnotationArtifactStore
             ];
         }
 
+        $sha = null;
+        try {
+            $sha = $this->hashFile($absolute);
+        } catch (\Throwable) {
+            $sha = null;
+        }
+
         return [
             'relative_path' => $relative,
             'exists' => true,
             'is_file' => true,
             'bytes' => filesize($absolute) ?: 0,
-            'sha256' => $this->hashFile($absolute),
+            'sha256' => $sha,
             'mtime' => filemtime($absolute) ?: null,
         ];
     }

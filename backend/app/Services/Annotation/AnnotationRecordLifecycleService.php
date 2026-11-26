@@ -1089,6 +1089,525 @@ class AnnotationRecordLifecycleService
         }
     }
 
+    /**
+     * Promote the exact staged artifact validated by B1 and finalize submission (S2-I6-D, ?6.3 steps 8-11).
+     *
+     * @return array{
+     *   record:AnnotationRecord,
+     *   validation_run:AnnotationValidationRun,
+     *   promotion:array<string,mixed>,
+     *   evidence_updated:bool,
+     *   cleanup:array<string,mixed>|null,
+     *   idempotent:bool
+     * }
+     */
+    public function promoteAndFinalizeSubmissionIntent(AnnotationRecord $record, User $actor, int $expectedLockVersion): array
+    {
+        $this->requireAnnotationRole($actor);
+        $this->assertSupportedDriver();
+
+        $locked = $this->lockRecord($record->id);
+        $this->assertCanPromoteSubmissionIntent($locked, $actor, $expectedLockVersion);
+
+        $recordId = (string) $locked->record_id;
+        $result = $this->store->withRecordPromotionLock($recordId, function () use ($record, $actor, $expectedLockVersion, $recordId): array {
+            $locked = $this->lockRecord($record->id);
+            $this->assertCanPromoteSubmissionIntent($locked, $actor, $expectedLockVersion);
+
+            $run = $this->findCompletedValidationRunForActiveIntent($locked);
+            $this->assertPromotionRunMatchesRecord($locked, $run);
+
+            $idempotent = $this->maybeReturnIdempotentFinalizedSubmission($locked, $run);
+            if ($idempotent !== null) {
+                $evidenceUpdated = $this->promoteValidationRunEvidenceToFinalArtifact($this->lockRecord($record->id), $run);
+                $cleanup = $this->cleanupPromotionTempIfPresent($this->lockRecord($record->id), $run);
+
+                return [
+                    'record' => $this->lockRecord($record->id),
+                    'validation_run' => $run->fresh() ?? $run,
+                    'promotion' => [
+                        'idempotent' => true,
+                        'relative_path' => (string) $locked->submitted_json_path,
+                        'sha256' => (string) $locked->submitted_artifact_sha256,
+                    ],
+                    'evidence_updated' => $evidenceUpdated,
+                    'cleanup' => $cleanup,
+                    'idempotent' => true,
+                ];
+            }
+
+            if ((string) $locked->submission_state === 'b1_completed') {
+                $this->markSubmissionPromotionPending($locked, $actor, $expectedLockVersion, $run);
+                $locked = $this->lockRecord($record->id);
+            } elseif ((string) $locked->submission_state !== 'promotion_pending') {
+                throw new AnnotationLifecycleConflictException('Submission intent is not eligible for promotion.');
+            }
+
+            $this->assertPromotionPendingPreconditions($locked, $actor, $run);
+
+            $promotion = $this->store->publishFinalSubmittedArtifact(
+                $recordId,
+                (string) $locked->submission_staging_path,
+                (string) $locked->submission_staging_sha256,
+                (string) $run->input_artifact_sha256,
+                false
+            );
+
+            $this->assertPublishedArtifactMatchesIntent($promotion, $locked, $run);
+
+            $finalizedRecord = $this->finalizeOrRecoverPromotedSubmission($locked, $actor, $run, $promotion, $expectedLockVersion);
+            $evidenceUpdated = $this->promoteValidationRunEvidenceToFinalArtifact($finalizedRecord, $run);
+
+            $cleanup = null;
+            $promotionTmp = $promotion['promotion_tmp_relative_path'] ?? null;
+            if ($evidenceUpdated && is_string($promotionTmp) && $promotionTmp !== '') {
+                $cleanup = $this->store->cleanupPromotionTempAfterEvidenceCommit(
+                    $recordId,
+                    $promotionTmp,
+                    (string) $finalizedRecord->submitted_artifact_sha256,
+                    (string) $run->input_artifact_sha256
+                );
+            } elseif ($evidenceUpdated) {
+                $cleanup = $this->cleanupPromotionTempIfPresent($this->lockRecord($record->id), $run);
+            }
+
+            return [
+                'record' => $this->lockRecord($record->id),
+                'validation_run' => $run->fresh() ?? $run,
+                'promotion' => $promotion,
+                'evidence_updated' => $evidenceUpdated,
+                'cleanup' => $cleanup,
+                'idempotent' => false,
+            ];
+        });
+
+        return $result;
+    }
+
+    private function assertCanPromoteSubmissionIntent(AnnotationRecord $record, User $actor, int $expectedLockVersion): void
+    {
+        $isOwner = (int) $record->created_by_user_id === (int) $actor->id;
+        if (! $isOwner || ! $actor->hasAnnotationRole()) {
+            throw new AnnotationLifecycleAuthorizationException('Only the draft owner with an authorized annotation role may finalize this submission.');
+        }
+
+        if ($expectedLockVersion < 1 || (int) $record->lock_version !== $expectedLockVersion) {
+            throw new AnnotationLifecycleConflictException('Stale lock_version; reload the record and retry.');
+        }
+
+        if ($record->discarded_at !== null) {
+            throw new AnnotationLifecycleConflictException('Discarded records cannot be finalized.');
+        }
+
+        $state = (string) $record->submission_state;
+        $isFinalized = $state === 'finalized' && (string) $record->artifact_state === 'submitted_finalized';
+        if (! in_array($state, ['b1_completed', 'promotion_pending'], true) && ! $isFinalized) {
+            throw new AnnotationLifecycleConflictException('Submission intent is not eligible for promotion.');
+        }
+
+        if ((string) $record->workflow_status !== 'draft' && ! $isFinalized) {
+            throw new AnnotationLifecycleConflictException('Only draft records can be promoted and finalized.');
+        }
+
+        if ((string) $record->artifact_state !== 'draft' && ! $isFinalized) {
+            throw new AnnotationLifecycleConflictException('Record artifact state is not eligible for promotion.');
+        }
+
+        if (! is_string($record->submission_intent_id) || trim($record->submission_intent_id) === ''
+            || ! is_string($record->submission_staging_path) || trim($record->submission_staging_path) === ''
+            || ! is_string($record->submission_staging_sha256) || trim($record->submission_staging_sha256) === '') {
+            throw new AnnotationLifecycleValidationException('Active submission intent metadata is missing or invalid.');
+        }
+
+        $stagingSha = strtolower((string) $record->submission_staging_sha256);
+        if (preg_match('/\A[a-f0-9]{64}\z/', $stagingSha) !== 1) {
+            throw new AnnotationLifecycleValidationException('Submission staging SHA-256 is invalid.');
+        }
+
+        if (! $isFinalized) {
+            if ($record->submitted_json_path !== null || $record->submitted_artifact_sha256 !== null || $record->submission_finalized_at !== null || $record->submitted_by_user_id !== null || $record->submitted_at !== null) {
+                throw new AnnotationLifecycleConflictException('Record already has finalized submission metadata.');
+            }
+        }
+    }
+
+    private function findCompletedValidationRunForActiveIntent(AnnotationRecord $record): AnnotationValidationRun
+    {
+        $run = AnnotationValidationRun::query()
+            ->where('annotation_record_id', $record->id)
+            ->where('submission_intent_id', (string) $record->submission_intent_id)
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $run instanceof AnnotationValidationRun) {
+            throw new AnnotationLifecycleConflictException('Completed B1 validation run for the active submission intent was not found.');
+        }
+
+        if ((string) $run->status !== 'completed') {
+            throw new AnnotationLifecycleConflictException('Submission intent is not eligible for promotion because B1 validation is not completed.');
+        }
+
+        if (! is_bool($run->is_valid)) {
+            throw new AnnotationLifecycleConflictException('Completed B1 validation run is missing validity metadata.');
+        }
+
+        return $run;
+    }
+
+    private function assertPromotionRunMatchesRecord(AnnotationRecord $record, AnnotationValidationRun $run): void
+    {
+        if ((int) $run->annotation_record_id !== (int) $record->id) {
+            throw new AnnotationLifecycleConflictException('Validation run does not belong to the record.');
+        }
+
+        if ((string) $run->submission_intent_id !== (string) $record->submission_intent_id) {
+            throw new AnnotationLifecycleConflictException('Validation run does not belong to the active submission intent.');
+        }
+
+        $runPath = is_string($run->input_artifact_path) ? trim($run->input_artifact_path) : '';
+        $runSha = is_string($run->input_artifact_sha256) ? strtolower(trim($run->input_artifact_sha256)) : '';
+        $stagingPath = (string) $record->submission_staging_path;
+        $stagingSha = strtolower((string) $record->submission_staging_sha256);
+
+        if ($runPath === '' || preg_match('/\A[a-f0-9]{64}\z/', $runSha) !== 1) {
+            throw new AnnotationLifecycleConflictException('Completed B1 validation run input metadata is invalid.');
+        }
+
+        if (! hash_equals($runPath, $stagingPath) || ! hash_equals($runSha, $stagingSha)) {
+            throw new AnnotationLifecycleConflictException('Staged submission artifact does not match the completed B1 validation input.');
+        }
+    }
+
+    private function assertPromotionPendingPreconditions(AnnotationRecord $record, User $actor, AnnotationValidationRun $run): void
+    {
+        $this->assertCanPromoteSubmissionIntent($record, $actor, (int) $record->lock_version);
+        if ((string) $record->submission_state !== 'promotion_pending') {
+            throw new AnnotationLifecycleConflictException('Submission intent is not promotion_pending.');
+        }
+        $this->assertPromotionRunMatchesRecord($record, $run);
+    }
+
+    private function markSubmissionPromotionPending(AnnotationRecord $record, User $actor, int $expectedLockVersion, AnnotationValidationRun $run): void
+    {
+        DB::transaction(function () use ($record, $actor, $expectedLockVersion, $run): void {
+            $txLocked = $this->lockRecord($record->id);
+            $this->assertCanPromoteSubmissionIntent($txLocked, $actor, $expectedLockVersion);
+            $this->assertPromotionRunMatchesRecord($txLocked, $run);
+            if ((string) $txLocked->submission_state !== 'b1_completed') {
+                throw new AnnotationLifecycleConflictException('Submission intent is not eligible for promotion pending transition.');
+            }
+
+            $nextLockVersion = (int) $txLocked->lock_version + 1;
+            $updatedAt = now();
+            $updatedRows = AnnotationRecord::query()
+                ->whereKey($txLocked->id)
+                ->where('lock_version', $expectedLockVersion)
+                ->where('submission_intent_id', (string) $record->submission_intent_id)
+                ->where('submission_state', 'b1_completed')
+                ->where('submission_staging_path', (string) $record->submission_staging_path)
+                ->where('submission_staging_sha256', (string) $record->submission_staging_sha256)
+                ->where('workflow_status', 'draft')
+                ->where('artifact_state', 'draft')
+                ->whereNull('discarded_at')
+                ->whereNull('submitted_json_path')
+                ->whereNull('submitted_artifact_sha256')
+                ->whereNull('submission_finalized_at')
+                ->update([
+                    'submission_state' => 'promotion_pending',
+                    'lock_version' => $nextLockVersion,
+                    'updated_at' => $updatedAt,
+                ]);
+
+            if ($updatedRows !== 1) {
+                $fresh = $this->lockRecord($record->id);
+                $this->assertCanPromoteSubmissionIntent($fresh, $actor, $expectedLockVersion);
+                throw new AnnotationLifecycleConflictException('Stale submission intent or lock_version; reload the record and retry.');
+            }
+
+            $fresh = $this->lockRecord($record->id);
+            $this->appendAudit(
+                record: $fresh,
+                actor: $actor,
+                actorType: 'user',
+                action: 'submission_promotion_pending',
+                fromWorkflowStatus: 'draft',
+                toWorkflowStatus: 'draft',
+                comment: null,
+                metadata: [
+                    'submission_intent_id' => (string) $fresh->submission_intent_id,
+                    'validation_run_id' => (string) $run->run_id,
+                    'from_submission_state' => 'b1_completed',
+                    'to_submission_state' => 'promotion_pending',
+                    'previous_lock_version' => $expectedLockVersion,
+                    'lock_version' => (int) $fresh->lock_version,
+                    'submission_staging_path' => (string) $fresh->submission_staging_path,
+                    'submission_staging_sha256' => (string) $fresh->submission_staging_sha256,
+                    'b1_valid' => (bool) $run->is_valid,
+                ],
+            );
+        });
+    }
+
+    /**
+     * @param  array<string,mixed>  $promotion
+     */
+    private function assertPublishedArtifactMatchesIntent(array $promotion, AnnotationRecord $record, AnnotationValidationRun $run): void
+    {
+        $finalPath = is_string($promotion['relative_path'] ?? null) ? $promotion['relative_path'] : '';
+        $finalSha = is_string($promotion['sha256'] ?? null) ? strtolower($promotion['sha256']) : '';
+        $expected = strtolower((string) $record->submission_staging_sha256);
+        $runSha = strtolower((string) $run->input_artifact_sha256);
+
+        if ($finalPath === '' || ! hash_equals($finalSha, $expected) || ! hash_equals($finalSha, $runSha)) {
+            throw new AnnotationLifecycleConflictException('Promoted final artifact does not match the staged submission intent.');
+        }
+    }
+
+    /**
+     * @param  array<string,mixed>  $promotion
+     */
+    private function finalizeOrRecoverPromotedSubmission(AnnotationRecord $record, User $actor, AnnotationValidationRun $run, array $promotion, int $expectedLockVersion): AnnotationRecord
+    {
+        $locked = $this->lockRecord($record->id);
+        if ((string) $locked->submission_state === 'finalized') {
+            $idempotent = $this->maybeReturnIdempotentFinalizedSubmission($locked, $run);
+            if ($idempotent !== null) {
+                return $this->lockRecord($record->id);
+            }
+            throw new AnnotationLifecycleConflictException('Finalized submission metadata is inconsistent.');
+        }
+
+        $this->assertCanPromoteSubmissionIntent($locked, $actor, (int) $locked->lock_version);
+        $this->assertPromotionRunMatchesRecord($locked, $run);
+
+        $expectedFinalizeLockVersion = (string) $locked->submission_state === 'promotion_pending'
+            ? (int) $locked->lock_version
+            : $expectedLockVersion;
+
+        return $this->finalizePromotedSubmission($locked, $actor, $run, $promotion, $expectedFinalizeLockVersion);
+    }
+
+    /**
+     * @param  array<string,mixed>  $promotion
+     */
+    private function finalizePromotedSubmission(AnnotationRecord $record, User $actor, AnnotationValidationRun $run, array $promotion, int $expectedFinalizeLockVersion): AnnotationRecord
+    {
+        return DB::transaction(function () use ($record, $actor, $run, $promotion, $expectedFinalizeLockVersion): AnnotationRecord {
+            $txLocked = $this->lockRecord($record->id);
+            $this->assertCanPromoteSubmissionIntent($txLocked, $actor, (int) $txLocked->lock_version);
+            $this->assertPromotionRunMatchesRecord($txLocked, $run);
+            if ((int) $txLocked->lock_version !== $expectedFinalizeLockVersion) {
+                throw new AnnotationLifecycleConflictException('Stale lock_version; reload the record and retry.');
+            }
+            if ((string) $txLocked->submission_state !== 'promotion_pending') {
+                $idempotent = $this->maybeReturnIdempotentFinalizedSubmission($txLocked, $run);
+                if ($idempotent !== null) {
+                    return $this->lockRecord($record->id);
+                }
+                throw new AnnotationLifecycleConflictException('Submission intent is not promotion_pending.');
+            }
+
+            $finalPath = (string) ($promotion['relative_path'] ?? '');
+            $finalSha = strtolower((string) ($promotion['sha256'] ?? ''));
+            if ($finalPath === '' || ! hash_equals($finalSha, strtolower((string) $txLocked->submission_staging_sha256))) {
+                throw new AnnotationLifecycleConflictException('Final artifact verification failed before DB finalization.');
+            }
+
+            $verifiedFinal = $this->store->verifyStoredArtifact($finalPath, $finalSha);
+            if (! hash_equals(strtolower((string) $verifiedFinal['sha256']), $finalSha)) {
+                throw new AnnotationLifecycleConflictException('Final artifact hash verification failed.');
+            }
+
+            $nextLockVersion = (int) $txLocked->lock_version + 1;
+            $now = now();
+            $workflowStatus = $run->is_valid ? 'validated' : 'validation_failed';
+            $updatedRows = AnnotationRecord::query()
+                ->whereKey($txLocked->id)
+                ->where('lock_version', $expectedFinalizeLockVersion)
+                ->where('submission_intent_id', (string) $txLocked->submission_intent_id)
+                ->where('submission_state', 'promotion_pending')
+                ->where('submission_staging_path', (string) $txLocked->submission_staging_path)
+                ->where('submission_staging_sha256', (string) $txLocked->submission_staging_sha256)
+                ->where('workflow_status', 'draft')
+                ->where('artifact_state', 'draft')
+                ->whereNull('discarded_at')
+                ->whereNull('submitted_json_path')
+                ->whereNull('submitted_artifact_sha256')
+                ->whereNull('submission_finalized_at')
+                ->whereNull('submitted_by_user_id')
+                ->whereNull('submitted_at')
+                ->update([
+                    'artifact_state' => 'submitted_finalized',
+                    'submitted_json_path' => $finalPath,
+                    'submitted_artifact_sha256' => $finalSha,
+                    'submitted_by_user_id' => $actor->id,
+                    'submitted_at' => $now,
+                    'submission_finalized_at' => $now,
+                    'submission_state' => 'finalized',
+                    'workflow_status' => $workflowStatus,
+                    'latest_validation_run_id' => $run->id,
+                    'latest_b1_valid' => (bool) $run->is_valid,
+                    'is_export_eligible_canonical' => (bool) $run->is_export_eligible_canonical,
+                    'lock_version' => $nextLockVersion,
+                    'updated_at' => $now,
+                ]);
+
+            if ($updatedRows !== 1) {
+                $fresh = $this->lockRecord($record->id);
+                $idempotent = $this->maybeReturnIdempotentFinalizedSubmission($fresh, $run);
+                if ($idempotent !== null) {
+                    return $this->lockRecord($record->id);
+                }
+                $this->assertCanPromoteSubmissionIntent($fresh, $actor, (int) $fresh->lock_version);
+                throw new AnnotationLifecycleConflictException('Stale submission intent or lock_version; reload the record and retry.');
+            }
+
+            $fresh = $this->lockRecord($record->id);
+            $this->appendAudit(
+                record: $fresh,
+                actor: $actor,
+                actorType: 'user',
+                action: 'submission_finalized',
+                fromWorkflowStatus: 'draft',
+                toWorkflowStatus: $workflowStatus,
+                comment: null,
+                metadata: [
+                    'submission_intent_id' => (string) $fresh->submission_intent_id,
+                    'validation_run_id' => (string) $run->run_id,
+                    'validation_run_db_id' => (int) $run->id,
+                    'from_submission_state' => 'promotion_pending',
+                    'to_submission_state' => 'finalized',
+                    'previous_lock_version' => $nextLockVersion - 1,
+                    'lock_version' => (int) $fresh->lock_version,
+                    'submission_staging_path' => (string) $fresh->submission_staging_path,
+                    'submission_staging_sha256' => (string) $fresh->submission_staging_sha256,
+                    'submitted_json_path' => (string) $fresh->submitted_json_path,
+                    'submitted_artifact_sha256' => (string) $fresh->submitted_artifact_sha256,
+                    'b1_status' => (string) $run->status,
+                    'b1_valid' => (bool) $run->is_valid,
+                    'b1_is_export_eligible_canonical' => (bool) $run->is_export_eligible_canonical,
+                    'b1_error_count' => (int) $run->error_count,
+                    'b1_warning_count' => (int) $run->warning_count,
+                    'b1_export_block_count' => (int) $run->export_block_count,
+                ],
+            );
+
+            return $fresh->fresh();
+        });
+    }
+
+    private function promoteValidationRunEvidenceToFinalArtifact(AnnotationRecord $record, AnnotationValidationRun $run): bool
+    {
+        return DB::transaction(function () use ($record, $run): bool {
+            $freshRecord = $this->lockRecord($record->id);
+            if ((string) $freshRecord->submission_state !== 'finalized' || (string) $freshRecord->artifact_state !== 'submitted_finalized') {
+                throw new AnnotationLifecycleConflictException('Record is not finalized for evidence promotion.');
+            }
+            if ((string) $freshRecord->submission_intent_id !== (string) $run->submission_intent_id) {
+                throw new AnnotationLifecycleConflictException('Finalized record intent does not match validation run.');
+            }
+
+            $finalPath = is_string($freshRecord->submitted_json_path) ? $freshRecord->submitted_json_path : '';
+            $finalSha = strtolower((string) $freshRecord->submitted_artifact_sha256);
+            $inputSha = strtolower((string) $run->input_artifact_sha256);
+            if ($finalPath === '' || ! hash_equals($finalSha, $inputSha)) {
+                throw new AnnotationLifecycleConflictException('Final artifact metadata does not match validation run input hash.');
+            }
+
+            $this->store->verifyStoredArtifact($finalPath, $finalSha);
+
+            $updated = AnnotationValidationRun::query()
+                ->where('annotation_record_id', $freshRecord->id)
+                ->where('submission_intent_id', (string) $run->submission_intent_id)
+                ->where('input_artifact_sha256', (string) $run->input_artifact_sha256)
+                ->whereIn('input_evidence_state', ['staged_path', 'retained_staging_copy', 'final_artifact'])
+                ->update([
+                    'input_evidence_state' => 'final_artifact',
+                    'durable_input_evidence_path' => $finalPath,
+                    'durable_input_evidence_sha256' => $finalSha,
+                    'updated_at' => now(),
+                ]);
+
+            if ($updated < 1) {
+                $existing = AnnotationValidationRun::query()
+                    ->where('annotation_record_id', $freshRecord->id)
+                    ->where('submission_intent_id', (string) $run->submission_intent_id)
+                    ->where('input_evidence_state', 'final_artifact')
+                    ->where('durable_input_evidence_path', $finalPath)
+                    ->where('durable_input_evidence_sha256', $finalSha)
+                    ->exists();
+                if (! $existing) {
+                    throw new AnnotationLifecycleConflictException('Validation run evidence could not be promoted to final artifact.');
+                }
+            }
+
+            return true;
+        });
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    private function maybeReturnIdempotentFinalizedSubmission(AnnotationRecord $record, AnnotationValidationRun $run): ?array
+    {
+        if ((string) $record->submission_state !== 'finalized' || (string) $record->artifact_state !== 'submitted_finalized') {
+            return null;
+        }
+
+        $finalPath = is_string($record->submitted_json_path) ? $record->submitted_json_path : '';
+        $finalSha = strtolower((string) $record->submitted_artifact_sha256);
+        $inputSha = strtolower((string) $run->input_artifact_sha256);
+        $expectedWorkflow = $run->is_valid ? 'validated' : 'validation_failed';
+
+        if ($finalPath === '' || $finalSha === '' || ! hash_equals($finalSha, $inputSha)) {
+            throw new AnnotationLifecycleConflictException('Finalized submission metadata is inconsistent.');
+        }
+
+        if ((string) $record->workflow_status !== $expectedWorkflow) {
+            throw new AnnotationLifecycleConflictException('Finalized submission workflow state is inconsistent.');
+        }
+
+        $this->store->verifyStoredArtifact($finalPath, $finalSha);
+
+        $runMatches = AnnotationValidationRun::query()
+            ->where('annotation_record_id', $record->id)
+            ->where('submission_intent_id', (string) $record->submission_intent_id)
+            ->where('input_artifact_sha256', $inputSha)
+            ->exists();
+        if (! $runMatches) {
+            throw new AnnotationLifecycleConflictException('Finalized submission validation evidence is inconsistent.');
+        }
+
+        return [
+            'relative_path' => $finalPath,
+            'sha256' => $finalSha,
+        ];
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    private function cleanupPromotionTempIfPresent(AnnotationRecord $record, AnnotationValidationRun $run): ?array
+    {
+        $inspection = $this->store->inspectRecordArtifacts((string) $record->record_id);
+        $temps = is_array($inspection['promotion_temps'] ?? null) ? $inspection['promotion_temps'] : [];
+        $cleanup = null;
+        foreach ($temps as $temp) {
+            $path = is_array($temp) && is_string($temp['relative_path'] ?? null) ? $temp['relative_path'] : null;
+            if ($path === null) {
+                continue;
+            }
+            $cleanup = $this->store->cleanupPromotionTempAfterEvidenceCommit(
+                (string) $record->record_id,
+                $path,
+                (string) $record->submitted_artifact_sha256,
+                (string) $run->input_artifact_sha256
+            );
+        }
+
+        return $cleanup;
+    }
+
     private function validationPersistence(): AnnotationValidationPersistenceService
     {
         $service = app(AnnotationValidationPersistenceService::class);
