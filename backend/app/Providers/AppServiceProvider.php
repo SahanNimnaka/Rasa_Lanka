@@ -2,7 +2,6 @@
 
 namespace App\Providers;
 
-use App\Models\User;
 use App\Policies\AnnotationPolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -39,5 +38,6 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('annotation.validate', [AnnotationPolicy::class, 'validate']);
         Gate::define('annotation.approve', [AnnotationPolicy::class, 'approve']);
         Gate::define('annotation.export-canonical', [AnnotationPolicy::class, 'exportCanonical']);
+        Gate::define('annotation.reconcile', [AnnotationPolicy::class, 'reconcile']);
     }
 }

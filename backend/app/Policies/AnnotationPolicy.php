@@ -34,4 +34,9 @@ class AnnotationPolicy
     {
         return $user->isResearchAdmin();
     }
+
+    public function reconcile(User $user): bool
+    {
+        return $user->isResearchAdmin();
+    }
 }

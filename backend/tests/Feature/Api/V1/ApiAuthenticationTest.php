@@ -252,6 +252,23 @@ class ApiAuthenticationTest extends TestCase
         );
     }
 
+    public function test_public_registration_cannot_assign_research_admin_role(): void
+    {
+        $response = $this->registerUser([
+            'role' => User::ROLE_RESEARCH_ADMIN,
+            'is_admin' => true,
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.email', 'user@example.com');
+
+        $user = User::query()->where('email', 'user@example.com')->firstOrFail();
+        $this->assertNull($user->role);
+        $this->assertFalse($user->isResearchAdmin());
+        $this->assertArrayNotHasKey('role', $response->json('data'));
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
