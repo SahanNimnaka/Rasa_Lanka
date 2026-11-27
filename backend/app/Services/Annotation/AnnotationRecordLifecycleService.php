@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Annotation\Exceptions\AnnotationLifecycleAuthorizationException;
 use App\Services\Annotation\Exceptions\AnnotationLifecycleConflictException;
 use App\Services\Annotation\Exceptions\AnnotationLifecycleValidationException;
+use App\Services\Annotation\Reconciliation\TrustedReconciliationPrincipal;
 use App\Services\Annotation\Storage\AnnotationArtifactStore;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -741,6 +742,16 @@ class AnnotationRecordLifecycleService
         }
 
         return $value;
+    }
+
+    private function nullableString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 
     private function normalizeRequiredString(mixed $value, string $field): string
@@ -1496,6 +1507,20 @@ class AnnotationRecordLifecycleService
         });
     }
 
+    /**
+     * Reconciliation-only evidence promotion. Requires trusted principal and current DB research_admin.
+     * Normal lifecycle promotion remains internal to submission finalization flows.
+     */
+    public function promoteFinalizedValidationRunEvidenceForReconciliation(
+        AnnotationRecord $record,
+        AnnotationValidationRun $run,
+        TrustedReconciliationPrincipal $principal
+    ): bool {
+        $this->assertCurrentReconciliationResearchAdmin($principal);
+
+        return $this->promoteValidationRunEvidenceToFinalArtifact($record, $run);
+    }
+
     private function promoteValidationRunEvidenceToFinalArtifact(AnnotationRecord $record, AnnotationValidationRun $run): bool
     {
         return DB::transaction(function () use ($record, $run): bool {
@@ -1582,6 +1607,333 @@ class AnnotationRecordLifecycleService
             'relative_path' => $finalPath,
             'sha256' => $finalSha,
         ];
+    }
+
+    /**
+     * Reconcile a verified final artifact for an active submission intent.
+     * Caller MUST hold the per-record promotion filesystem lock.
+     *
+     * I6-D parity note: this reconciliation path intentionally remains separate from
+     * promoteAndFinalizeSubmissionIntent/finalizePromotedSubmission/markSubmissionPromotionPending.
+     * The normal path enforces owner + expectedLockVersion actor flow and draft-only promotion;
+     * reconciliation allows owner-or-research_admin repair of verified-final anomalies and already-
+     * finalized evidence sync, while reusing I6-D invariants/helpers where safe. Shared extraction
+     * was avoided because authorization, idempotent-repair, and audit metadata differ subtly and
+     * broad refactor risks I6-D behavior. Keep these invariants equivalent: intent/staging/run/final
+     * hash correlation, no-replace/conflict fail-closed, lock_version CAS, workflow mapping by
+     * run->is_valid, submitted artifact/hash/timestamps/cache pointers, submission_promotion_pending
+     * and submission_finalized audit atomicity, evidence promotion only for verified finalized final,
+     * and promotion temp cleanup only after durable evidence commit.
+     *
+     * @param  array<string,mixed>  $promotion
+     * @return array{record:AnnotationRecord,validation_run:AnnotationValidationRun,promotion:array<string,mixed>,evidence_updated:bool,cleanup:array<string,mixed>|null,idempotent:bool}
+     */
+    public function reconcileVerifiedFinalizedPromotion(
+        AnnotationRecord $record,
+        AnnotationValidationRun $run,
+        array $promotion,
+        TrustedReconciliationPrincipal $principal
+    ): array {
+        $this->assertSupportedDriver();
+
+        $actor = $this->assertCurrentReconciliationResearchAdmin($principal);
+
+        $locked = $this->lockRecord($record->id);
+        $this->assertReconciliationPromotionPreconditions($locked, $run, $promotion, $actor);
+
+        $expectedLockVersion = (int) $locked->lock_version;
+        $idempotent = $this->maybeReturnIdempotentFinalizedSubmission($locked, $run);
+        if ($idempotent !== null) {
+            $evidenceUpdated = $this->promoteValidationRunEvidenceToFinalArtifact($this->lockRecord($record->id), $run);
+            $cleanup = $this->cleanupPromotionTempIfPresent($this->lockRecord($record->id), $run);
+
+            return [
+                'record' => $this->lockRecord($record->id),
+                'validation_run' => $run->fresh() ?? $run,
+                'promotion' => $promotion + ['idempotent' => true],
+                'evidence_updated' => $evidenceUpdated,
+                'cleanup' => $cleanup,
+                'idempotent' => true,
+            ];
+        }
+
+        if ((string) $locked->submission_state === 'b1_completed') {
+            $this->markSubmissionPromotionPendingForReconciliation($locked, $run, $actor, $expectedLockVersion);
+            $locked = $this->lockRecord($record->id);
+            $expectedLockVersion = (int) $locked->lock_version;
+        }
+
+        $this->assertReconciliationPromotionPreconditions($locked, $run, $promotion, $actor);
+        $idempotent = $this->maybeReturnIdempotentFinalizedSubmission($locked, $run);
+        if ($idempotent !== null) {
+            $evidenceUpdated = $this->promoteValidationRunEvidenceToFinalArtifact($this->lockRecord($record->id), $run);
+            $cleanup = $this->cleanupPromotionTempIfPresent($this->lockRecord($record->id), $run);
+
+            return [
+                'record' => $this->lockRecord($record->id),
+                'validation_run' => $run->fresh() ?? $run,
+                'promotion' => $promotion + ['idempotent' => true],
+                'evidence_updated' => $evidenceUpdated,
+                'cleanup' => $cleanup,
+                'idempotent' => true,
+            ];
+        }
+        if ((string) $locked->submission_state !== 'promotion_pending') {
+            throw new AnnotationLifecycleConflictException('Submission intent is not eligible for reconciliation finalization.');
+        }
+
+        $finalizedRecord = $this->finalizePromotedSubmissionForReconciliation($locked, $run, $promotion, $expectedLockVersion, $actor);
+        $evidenceUpdated = $this->promoteValidationRunEvidenceToFinalArtifact($finalizedRecord, $run);
+        $cleanup = null;
+        $promotionTmp = $promotion['promotion_tmp_relative_path'] ?? null;
+        if ($evidenceUpdated && is_string($promotionTmp) && $promotionTmp !== '') {
+            $cleanup = $this->store->cleanupPromotionTempAfterEvidenceCommit(
+                (string) $finalizedRecord->record_id,
+                $promotionTmp,
+                (string) $finalizedRecord->submitted_artifact_sha256,
+                (string) $run->input_artifact_sha256
+            );
+        } elseif ($evidenceUpdated) {
+            $cleanup = $this->cleanupPromotionTempIfPresent($this->lockRecord($record->id), $run);
+        }
+
+        return [
+            'record' => $this->lockRecord($record->id),
+            'validation_run' => $run->fresh() ?? $run,
+            'promotion' => $promotion,
+            'evidence_updated' => $evidenceUpdated,
+            'cleanup' => $cleanup,
+            'idempotent' => false,
+        ];
+    }
+
+    private function assertCurrentReconciliationResearchAdmin(TrustedReconciliationPrincipal $principal): User
+    {
+        $actor = User::query()->whereKey($principal->userId())->first();
+        if (! $actor instanceof User || ! $actor->isResearchAdmin()) {
+            throw new AnnotationLifecycleAuthorizationException(
+                'Reconciliation requires an authenticated, currently authorized research_admin principal.'
+            );
+        }
+
+        return $actor;
+    }
+
+    /**
+     * @param  array<string,mixed>  $promotion
+     */
+    private function assertReconciliationPromotionPreconditions(AnnotationRecord $record, AnnotationValidationRun $run, array $promotion, ?User $actor): void
+    {
+        if (! $actor instanceof User || ! $actor->isResearchAdmin()) {
+            throw new AnnotationLifecycleAuthorizationException(
+                'Reconciliation requires an authenticated, currently authorized research_admin principal.'
+            );
+        }
+
+        if ($record->discarded_at !== null) {
+            throw new AnnotationLifecycleConflictException('Discarded records cannot be finalized.');
+        }
+
+        $state = (string) $record->submission_state;
+        $isFinalized = $state === 'finalized' && (string) $record->artifact_state === 'submitted_finalized';
+        if (! in_array($state, ['b1_completed', 'promotion_pending'], true) && ! $isFinalized) {
+            throw new AnnotationLifecycleConflictException('Submission intent is not eligible for promotion.');
+        }
+
+        if (! is_string($record->submission_intent_id) || trim($record->submission_intent_id) === ''
+            || ! is_string($record->submission_staging_path) || trim($record->submission_staging_path) === ''
+            || ! is_string($record->submission_staging_sha256) || trim($record->submission_staging_sha256) === '') {
+            throw new AnnotationLifecycleValidationException('Active submission intent metadata is missing or invalid.');
+        }
+
+        $stagingSha = strtolower((string) $record->submission_staging_sha256);
+        if (preg_match('/\A[a-f0-9]{64}\z/', $stagingSha) !== 1) {
+            throw new AnnotationLifecycleValidationException('Submission staging SHA-256 is invalid.');
+        }
+
+        $this->assertPromotionRunMatchesRecord($record, $run);
+        $this->assertPublishedArtifactMatchesIntent($promotion, $record, $run);
+
+        $finalPath = is_string($promotion['relative_path'] ?? null) ? $promotion['relative_path'] : '';
+        $finalSha = strtolower((string) ($promotion['sha256'] ?? ''));
+        $this->store->verifyStoredArtifact($finalPath, $finalSha);
+
+        if (! $isFinalized) {
+            if ((string) $record->workflow_status !== 'draft' || (string) $record->artifact_state !== 'draft') {
+                throw new AnnotationLifecycleConflictException('Only draft records can be promoted and finalized.');
+            }
+            if ($record->submitted_json_path !== null || $record->submitted_artifact_sha256 !== null || $record->submission_finalized_at !== null || $record->submitted_by_user_id !== null || $record->submitted_at !== null) {
+                throw new AnnotationLifecycleConflictException('Record already has finalized submission metadata.');
+            }
+        }
+    }
+
+    private function markSubmissionPromotionPendingForReconciliation(AnnotationRecord $record, AnnotationValidationRun $run, ?User $actor, int $expectedLockVersion): void
+    {
+        DB::transaction(function () use ($record, $run, $actor, $expectedLockVersion): void {
+            $txLocked = $this->lockRecord($record->id);
+            $finalPath = $this->normalizeNullableString($txLocked->submitted_json_path, 'submitted_json_path')
+                ?? $this->store->finalSubmittedRelativePathForRecord((string) $txLocked->record_id);
+            $this->assertReconciliationPromotionPreconditions($txLocked, $run, [
+                'relative_path' => $finalPath,
+                'sha256' => (string) $txLocked->submission_staging_sha256,
+            ], $actor);
+            if ((int) $txLocked->lock_version !== $expectedLockVersion || (string) $txLocked->submission_state !== 'b1_completed') {
+                throw new AnnotationLifecycleConflictException('Stale submission intent or lock_version; reload the record and retry.');
+            }
+
+            $nextLockVersion = $expectedLockVersion + 1;
+            $updatedAt = now();
+            $updatedRows = AnnotationRecord::query()
+                ->whereKey($txLocked->id)
+                ->where('lock_version', $expectedLockVersion)
+                ->where('submission_intent_id', (string) $record->submission_intent_id)
+                ->where('submission_state', 'b1_completed')
+                ->where('submission_staging_path', (string) $record->submission_staging_path)
+                ->where('submission_staging_sha256', (string) $record->submission_staging_sha256)
+                ->where('workflow_status', 'draft')
+                ->where('artifact_state', 'draft')
+                ->whereNull('discarded_at')
+                ->whereNull('submitted_json_path')
+                ->whereNull('submitted_artifact_sha256')
+                ->whereNull('submission_finalized_at')
+                ->update([
+                    'submission_state' => 'promotion_pending',
+                    'lock_version' => $nextLockVersion,
+                    'updated_at' => $updatedAt,
+                ]);
+
+            if ($updatedRows !== 1) {
+                throw new AnnotationLifecycleConflictException('Stale submission intent or lock_version; reload the record and retry.');
+            }
+
+            $fresh = $this->lockRecord($record->id);
+            $this->appendAudit(
+                record: $fresh,
+                actor: $actor,
+                actorType: $actor instanceof User ? 'user' : 'system',
+                action: 'submission_promotion_pending',
+                fromWorkflowStatus: 'draft',
+                toWorkflowStatus: 'draft',
+                comment: null,
+                metadata: [
+                    'submission_intent_id' => (string) $fresh->submission_intent_id,
+                    'validation_run_id' => (string) $run->run_id,
+                    'from_submission_state' => 'b1_completed',
+                    'to_submission_state' => 'promotion_pending',
+                    'previous_lock_version' => $expectedLockVersion,
+                    'lock_version' => (int) $fresh->lock_version,
+                    'submission_staging_path' => (string) $fresh->submission_staging_path,
+                    'submission_staging_sha256' => (string) $fresh->submission_staging_sha256,
+                    'b1_valid' => (bool) $run->is_valid,
+                    'reconciliation' => true,
+                ],
+            );
+        });
+    }
+
+    /**
+     * @param  array<string,mixed>  $promotion
+     */
+    private function finalizePromotedSubmissionForReconciliation(AnnotationRecord $record, AnnotationValidationRun $run, array $promotion, int $expectedFinalizeLockVersion, ?User $actor): AnnotationRecord
+    {
+        return DB::transaction(function () use ($record, $run, $promotion, $expectedFinalizeLockVersion, $actor): AnnotationRecord {
+            $txLocked = $this->lockRecord($record->id);
+            $this->assertReconciliationPromotionPreconditions($txLocked, $run, $promotion, $actor);
+            if ((int) $txLocked->lock_version !== $expectedFinalizeLockVersion) {
+                throw new AnnotationLifecycleConflictException('Stale lock_version; reload the record and retry.');
+            }
+            if ((string) $txLocked->submission_state !== 'promotion_pending') {
+                $idempotent = $this->maybeReturnIdempotentFinalizedSubmission($txLocked, $run);
+                if ($idempotent !== null) {
+                    return $this->lockRecord($record->id);
+                }
+                throw new AnnotationLifecycleConflictException('Submission intent is not promotion_pending.');
+            }
+
+            $finalPath = (string) ($promotion['relative_path'] ?? '');
+            $finalSha = strtolower((string) ($promotion['sha256'] ?? ''));
+            $verifiedFinal = $this->store->verifyStoredArtifact($finalPath, $finalSha);
+            if (! hash_equals(strtolower((string) $verifiedFinal['sha256']), $finalSha)) {
+                throw new AnnotationLifecycleConflictException('Final artifact hash verification failed.');
+            }
+
+            $nextLockVersion = (int) $txLocked->lock_version + 1;
+            $now = now();
+            $workflowStatus = $run->is_valid ? 'validated' : 'validation_failed';
+            $updatedRows = AnnotationRecord::query()
+                ->whereKey($txLocked->id)
+                ->where('lock_version', $expectedFinalizeLockVersion)
+                ->where('submission_intent_id', (string) $txLocked->submission_intent_id)
+                ->where('submission_state', 'promotion_pending')
+                ->where('submission_staging_path', (string) $txLocked->submission_staging_path)
+                ->where('submission_staging_sha256', (string) $txLocked->submission_staging_sha256)
+                ->where('workflow_status', 'draft')
+                ->where('artifact_state', 'draft')
+                ->whereNull('discarded_at')
+                ->whereNull('submitted_json_path')
+                ->whereNull('submitted_artifact_sha256')
+                ->whereNull('submission_finalized_at')
+                ->whereNull('submitted_by_user_id')
+                ->whereNull('submitted_at')
+                ->update([
+                    'artifact_state' => 'submitted_finalized',
+                    'submitted_json_path' => $finalPath,
+                    'submitted_artifact_sha256' => $finalSha,
+                    'submitted_by_user_id' => $actor?->id,
+                    'submitted_at' => $now,
+                    'submission_finalized_at' => $now,
+                    'submission_state' => 'finalized',
+                    'workflow_status' => $workflowStatus,
+                    'latest_validation_run_id' => $run->id,
+                    'latest_b1_valid' => (bool) $run->is_valid,
+                    'is_export_eligible_canonical' => (bool) $run->is_export_eligible_canonical,
+                    'lock_version' => $nextLockVersion,
+                    'updated_at' => $now,
+                ]);
+
+            if ($updatedRows !== 1) {
+                $fresh = $this->lockRecord($record->id);
+                $idempotent = $this->maybeReturnIdempotentFinalizedSubmission($fresh, $run);
+                if ($idempotent !== null) {
+                    return $this->lockRecord($record->id);
+                }
+                throw new AnnotationLifecycleConflictException('Stale submission intent or lock_version; reload the record and retry.');
+            }
+
+            $fresh = $this->lockRecord($record->id);
+            $this->appendAudit(
+                record: $fresh,
+                actor: $actor,
+                actorType: $actor instanceof User ? 'user' : 'system',
+                action: 'submission_finalized',
+                fromWorkflowStatus: 'draft',
+                toWorkflowStatus: $workflowStatus,
+                comment: null,
+                metadata: [
+                    'submission_intent_id' => (string) $fresh->submission_intent_id,
+                    'validation_run_id' => (string) $run->run_id,
+                    'validation_run_db_id' => (int) $run->id,
+                    'from_submission_state' => 'promotion_pending',
+                    'to_submission_state' => 'finalized',
+                    'previous_lock_version' => $nextLockVersion - 1,
+                    'lock_version' => (int) $fresh->lock_version,
+                    'submission_staging_path' => (string) $fresh->submission_staging_path,
+                    'submission_staging_sha256' => (string) $fresh->submission_staging_sha256,
+                    'submitted_json_path' => (string) $fresh->submitted_json_path,
+                    'submitted_artifact_sha256' => (string) $fresh->submitted_artifact_sha256,
+                    'b1_status' => (string) $run->status,
+                    'b1_valid' => (bool) $run->is_valid,
+                    'b1_is_export_eligible_canonical' => (bool) $run->is_export_eligible_canonical,
+                    'b1_error_count' => (int) $run->error_count,
+                    'b1_warning_count' => (int) $run->warning_count,
+                    'b1_export_block_count' => (int) $run->export_block_count,
+                    'reconciliation' => true,
+                ],
+            );
+
+            return $fresh->fresh();
+        });
     }
 
     /**
